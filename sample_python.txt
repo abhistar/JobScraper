@@ -1,0 +1,395 @@
+import os
+import re
+import csv
+import sys
+import json
+import time
+import argparse
+import subprocess
+import urllib.requestfrom datetime import datetime
+from playwright.sync_api import sync_playwright
+# 1. Output setup: within the repo location itself
+REPO_DIR = os.path.dirname(os.path.abspath(__file__))
+desktop_dir = REPO_DIR
+date_str = datetime.now().strftime("%d%m%y")
+output_file = os.path.join(desktop_dir, f"job_lookup_{date_str}.csv")
+CSV_HEADERS = [
+    "Source",
+    "Job Title",
+    "Company",
+    "Location",
+    "Experience Required",
+    "Company Size",
+    "Date Posted",
+    "Job URL"
+]
+TRACKER_HEADERS = [
+    "Job title",
+    "Company",
+    "Job URL",
+    "Source website",
+    "Location",
+    "Date posted",
+    "Match score",
+    "Application status",
+    "Date applied",
+    "Resume used",
+    "Notes",
+    "Confirmation evidence"
+]
+ALLOWED_PROFILES = {"abhinav": "Abhinav", "anushree": "Anushree"}
+TARGET_PROFILE_NAME = "Abhinav"
+CDP_URL = "http://127.0.0.1:9222"
+
+def verify_active_profile(page, target_name=TARGET_PROFILE_NAME):
+    """
+    Navigates to LinkedIn and verifies the active account-specific identity.
+    Stops execution if LinkedIn is logged in under a different account or unauthenticated.
+    """
+    print(f"[*] Verifying that active browser session belongs to '{target_name}'...")
+    page.goto("https://www.linkedin.com/feed/", wait_until="domcontentloaded", timeout=30000)
+    time.sleep(3)
+    # Check for login redirection
+    if any(auth in page.url.lower() for auth in ["/login", "/authwall", "/checkpoint"]):
+        print("\n[!] ERROR: LinkedIn session is not logged in.")
+        print("[!] Please log into LinkedIn in Edge and re-run.\n")
+        sys.exit(1)
+    # Check identity card link in sidebar
+    profile_links = page.query_selector_all('a[href*="/in/"]')
+    for pl in profile_links:
+        txt = pl.inner_text().strip()
+        href = pl.get_attribute("href") or ""
+        # Verify name match
+        if target_name.lower() in txt.lower():
+            first_line = txt.splitlines()[0] if txt else target_name
+            print(f"[✓] CONFIRMED: Active LinkedIn identity verified as '{first_line}' ({href})")
+            return True
+    # Fallback check on /in/me/
+    try:
+        page.goto("https://www.linkedin.com/in/me/", wait_until="domcontentloaded", timeout=15000)
+        time.sleep(2)
+        if target_name.lower() in page.title().lower():
+            print(f"[✓] CONFIRMED: Active profile verified via /in/me/ title: '{page.title()}'")
+            return True
+    except Exception:
+        pass
+    print(f"\n[!] ERROR: Current logged-in LinkedIn user does not match '{target_name}'.")
+    print(f"[!] Intended profile '{target_name}' could not be verified on LinkedIn.")
+    print("[!] Execution stopped to prevent scraping under a different account.\n")
+    sys.exit(1)
+def scrape_linkedin(page, target_name=None):
+    if target_name is None:
+        target_name = TARGET_PROFILE_NAME
+    jobs = []
+    seen_urls = set()
+    print("\n" + "=" * 50)
+    print(f"  LINKEDIN JOBS (Profile: {target_name})")
+    print("=" * 50)
+
+        print("[*] Finding 'Jobs based on your preferences' section and clicking 'Show all'...")
+        clicked = page.evaluate("""() => {
+            const link = document.querySelector("a[href*='JobSearchOrigin_PREFERENCES_LANDING']") ||
+                         document.querySelector("a[href*='PREFERENCES_LANDING']");
+            if (link) {
+                link.click();
+                return true;
+            }
+            const headings = Array.from(document.querySelectorAll("h1, h2, h3, header, div"));
+            const targetH = headings.find(h => h.innerText && h.innerText.includes("Jobs based on your preferences"));
+            if (!targetH) return false;
+            const section = targetH.closest("section") || targetH.closest(".artdeco-card") || targetH.parentElement;
+            const showAll = Array.from(section.querySelectorAll("a")).find(a => a.innerText && a.innerText.toLowerCase().includes("show all"));
+            if (showAll) {
+                showAll.click();
+                return true;
+            }
+            return false;
+        }""")
+        if not clicked:
+            print("[!] Note: Attempting locator search for Preferences Show all...")
+            pref_link = page.locator("a[href*='PREFERENCES_LANDING']").first
+            if pref_link.is_visible():
+                pref_link.click()
+                clicked = True
+        try:
+            page.wait_for_load_state("domcontentloaded", timeout=15000)
+        except Exception:
+            pass
+        page.wait_for_timeout(3000)
+        print(f"[*] Preferences search results opened: {page.url[:80]}...")
+        # 3. Apply 'Past week' filter
+        if "f_TPR=r604800" not in page.url:
+            print("[*] Applying 'Past week' filter...")
+            # Open Date posted dropdown
+            page.evaluate("""() => {
+                const btn = document.querySelector("div[role='button'][aria-label*='Date posted']") ||
+                            document.querySelector("[aria-label*='Filter by Date posted']") ||
+                            Array.from(document.querySelectorAll("div[role='button'], button, label")).find(el => el.innerText && el.innerText.trim() === "Date posted");
+                if (btn) btn.click();
+            }""")
+            page.wait_for_timeout(1200)
+            # Select Past week radio
+            page.evaluate("""() => {
+                const radio = document.querySelector("input[aria-label='Past week']") ||
+                              Array.from(document.querySelectorAll("label, span, p")).find(el => el.innerText && el.innerText.trim() === "Past week");
+                if (radio) radio.click();
+            }""")
+            page.wait_for_timeout(800)
+            # Click Show results button
+            page.evaluate("""() => {
+                const showBtn = Array.from(document.querySelectorAll("a, button")).find(el => el.innerText && el.innerText.includes("Show results"));
+                if (showBtn) showBtn.click();
+            }""")
+        try:
+            page.wait_for_load_state("domcontentloaded", timeout=15000)
+                except Exception:
+                    pass
+                page.wait_for_timeout(3000)
+
+        # Fallback to query parameter if not yet applied
+                if "f_TPR=r604800" not in page.url:
+                    delim = "&" if "?" in page.url else "?"
+                    page.goto(f"{page.url}{delim}f_TPR=r604800", wait_until="domcontentloaded")
+                    page.wait_for_timeout(2500)
+
+        # 4. Scroll to ensure jobs are loaded
+            print("[*] Loading preferences job listings...")
+            for _ in range(3):
+                page.evaluate("""() => {
+                    const col = document.querySelector("div[data-testid='lazy-column']");
+                    if (col) col.scrollBy(0, 1000);
+                    else window.scrollBy(0, 800);
+                }""")
+                time.sleep(1)
+
+        # 5. Collect jobs
+            modern_cards = page.evaluate("""() => {
+                const col = document.querySelector("div[data-testid='lazy-column']");
+                const root = col || document;
+                const buttons = Array.from(root.querySelectorAll("div[role='button']")).filter(b => {
+                    const ck = b.getAttribute("componentkey") || "";
+                    return ck.startsWith("job-card-component-ref-");
+                });
+                return buttons.map(b => {
+                    const ck = b.getAttribute("componentkey") || "";
+                    const jobId = ck.replace("job-card-component-ref-", "");
+
+                    // 1. Clean Title
+                    let title = "";
+                    const titleSpan = b.querySelector("span[aria-hidden='true']");
+                    if (titleSpan) title = titleSpan.innerText.trim();
+                    if (!title) {
+                        const dismissBtn = b.querySelector("button[aria-label*='Dismiss']");
+                        if (dismissBtn) {
+                            const al = dismissBtn.getAttribute("aria-label") || "";
+                            title = al.replace(/^Dismiss\\s+/i, "").replace(/\\s+job$/i, "").trim();
+                        }
+                    }
+                    if (!title) {
+                        const lines = b.innerText.split("\\n").map(l => l.trim()).filter(Boolean);
+                        let rawTitle = lines[0] || "";
+                        rawTitle = rawTitle.replace(/^Selected,\\s*/i, "").replace(/\\(Verified job\\)/gi, "").replace(/·\\s*Verified job/gi, "").trim();
+                        title = rawTitle;
+                    }
+        // 2. Company & Location from clean paragraphs
+                    const paras = Array.from(b.querySelectorAll("p")).filter(p => {
+                        const txt = p.innerText.trim();
+                        if (!txt) return false;
+                        if (title && (txt === title || txt.includes(title))) return false;
+                        if (p.querySelector("span[aria-hidden='true']")) return false;
+                        if (p.querySelector("button, svg, figure")) return false;
+                        if (txt.includes("connection works here") ||
+                            txt.includes("alumni work here") ||
+                            txt.includes("Viewed") ||
+                            txt.includes("Be an early applicant") ||
+                            txt.includes("Actively reviewing applicants") ||
+                            txt.includes("Easy Apply") ||
+                            txt === "·" || txt === "•") return false;
+                        return true;
+                    }).map(p => p.innerText.trim());
+                    let company = paras[0] || "";
+                                let location = paras[1] || "";
+                                if (!company || !location) {
+                                    const lines = b.innerText.split("\\n").map(l => l.trim()).filter(Boolean);
+                                    const clean = lines.filter(l => !["(Verified job)", "Be an early applicant", "Easy Apply", "Actively reviewing applicants", "Viewed", "·", "•"].includes(l));
+                                    if (!company && clean.length > 1) company = clean[1];
+                                    if (!location && clean.length > 2) location = clean[2];
+                                }
+                    return {
+                                    jobId: jobId,
+                                    jobUrl: "https://www.linkedin.com/jobs/view/" + jobId + "/",
+                                    title: title,
+                                    company: company,
+                                    location: location,
+                                    fullText: b.innerText
+                                };
+                            });
+                        }""")
+
+
+        if modern_cards:
+                print(f"    Found {len(modern_cards)} listings in Preferences (Past week)")
+                for c in modern_cards:
+                    try:
+                        full_text = c.get("fullText", "")
+                        if not full_text:
+                            continue
+
+                            clean_link = c.get("jobUrl", "")
+                                            if not clean_link or clean_link in seen_urls:
+                                                continue
+
+                                                title = c.get("title", "").strip()
+                                                company = c.get("company", "").strip()
+                                                location = c.get("location", "").strip()
+
+                            if not title or title.upper() == "N/A" or not company:
+                                                continue
+
+                            # Check applied status specifically (avoid matching 'Applied Materials' company name)
+                                            card_applied = False
+                                            for line in full_text.splitlines():
+                                                l = line.strip().lower()
+                                                if l in ("applied", "application submitted") or re.match(r"^applied\s+(on|\d+|yesterday|just now|today)", l):
+                                                    card_applied = True
+                                                    break
+                                            if card_applied:
+                                                continue
+                                            seen_urls.add(clean_link)
+
+                d_m = re.search(r"(\d+\s+(?:day|hour|minute|week|month)s?\s+ago|\d+[dhwm]\s+ago)", full_text, re.I)
+                                date_posted = d_m.group(0) if d_m else "Past week"
+                                # Right detail pane for verification if available
+                                company_size = ""
+                                exp_req = ""
+                                job_id = c.get("jobId")
+                                detail_text = ""
+                                if job_id:
+                                    try:
+                                        detail_text = page.evaluate("""(jid) => {
+                                            const btn = document.querySelector(`div[role="button"][componentkey*="${jid}"]`);
+                                            if (btn) btn.click();
+                                            const col = document.querySelector("div[data-testid='lazy-column']");
+                                            if (!col) return "";
+                                            const twoCol = col.closest(".fa4lka") || (col.parentElement ? col.parentElement.parentElement : null);
+                                            if (twoCol && twoCol.children.length > 1) {
+                                                return twoCol.children[1].innerText || "";
+                                            }
+                                            const detail = document.querySelector(".jobs-details__main-content, .scaffold-layout__detail, .job-view-layout");
+                                            return detail ? (detail.innerText || "") : "";
+                                        }""", job_id) or ""
+                                        time.sleep(0.8)
+                                    except Exception:
+                                        detail_text = ""
+                                # If detail pane has explicit applied status, skip
+                                if detail_text:
+                                    detail_applied = False
+                                    for line in detail_text.splitlines():
+                                        l = line.strip().lower()
+                                        if l in ("applied", "application submitted") or re.match(r"^applied\s+(on|\d+|yesterday|just now|today)", l):
+                                            detail_applied = True
+                                            break
+                                    if detail_applied:
+                                        continue
+                                    # Verified Company Size
+                                    cs_m = re.search(r"([\d,]+(?:\s*-\s*[\d,]+|\+)?\s+employees)", detail_text, re.I)
+                                    company_size = cs_m.group(0) if cs_m else ""
+
+                if is_small_company(company_size):
+                                        continue
+
+                # Verified Experience Required
+                                    exp_m = re.search(r"(\d+\+?\s*(?:to\s*\d+\+?)?\s*years?(?:\s+of)?(?:\s+\w+)?\s+experience)", detail_text, re.I)
+                                    exp_req = exp_m.group(0) if exp_m else ""
+
+                                    jobs.append({
+                                                        "Source": "LinkedIn",
+                                                        "Job Title": title,
+                                                        "Company": company,
+                                                        "Location": location,
+                                                        "Experience Required": exp_req,
+                                                        "Company Size": company_size,
+                                                        "Date Posted": date_posted,
+                                                        "Job URL": clean_link
+                                                    })
+                                                    print(f"    [+] Collected: {title} at {company} ({location}) - {date_posted}")
+                                                except Exception:
+                                                    continue
+                                        else:
+                                            # Fallback to classic selector
+                                            cards = page.query_selector_all(
+                                                "li[data-occludable-job-id], .jobs-search-results__list-item, div[data-job-id]"
+                                            )
+                                            print(f"    Found {len(cards)} listings (classic layout)")
+                                            for card in cards:
+                                                try:
+                                                    card_text = card.inner_text().strip()
+                                                    if not card_text:
+                                                        continue
+                        linkedin_jobs = scrape_linkedin(page, target_profile_name)
+                        instahyre_jobs = scrape_instahyre(page, target_profile_name)
+                        all_jobs = linkedin_jobs + instahyre_jobs
+                        page.close()
+                        # Save to repo / desktop_dir
+                        if all_jobs:
+                            os.makedirs(desktop_dir, exist_ok=True)
+                            with open(output_file, "w", newline="", encoding="utf-8") as f:
+                                writer = csv.DictWriter(f, fieldnames=CSV_HEADERS)
+                                writer.writeheader()
+                                writer.writerows(all_jobs)
+                            print("\n" + "=" * 60)
+                            print(f"[✓] Completed under Profile: {display_name} (Folder: {folder})")
+                            print(f"[✓] Total matching unapplied jobs: {len(all_jobs)}")
+                            print(f"    - LinkedIn:  {len(linkedin_jobs)}")
+                            print(f"    - Instahyre: {len(instahyre_jobs)}")
+                            print(f"[✓] Saved to: {output_file}")
+                            print("=" * 60 + "\n")
+                            # Update tracker file with new jobs if not already present
+                            if os.path.exists(tracker_filepath):
+                                existing_urls = set()
+                                try:
+                                    with open(tracker_filepath, "r", encoding="utf-8") as tf:
+                                        reader = csv.DictReader(tf)
+                                        for row in reader:
+                                            u = row.get("Job URL") or row.get("Job url") or ""
+                                            if u:
+                                                existing_urls.add(u.strip())
+                                except Exception:
+                                    pass
+                                new_entries = []
+                                for j in all_jobs:
+                                    j_url = j.get("Job URL", "").strip()
+                                    if j_url and j_url not in existing_urls:
+                                        new_entries.append({
+                                            "Job title": j.get("Job Title", ""),
+                                            "Company": j.get("Company", ""),
+                                            "Job URL": j_url,
+                                            "Source website": j.get("Source", ""),
+                                            "Location": j.get("Location", ""),
+                                            "Date posted": j.get("Date Posted", ""),
+                                            "Match score": "",
+                                            "Application status": "Collected",
+                                            "Date applied": "",
+                                            "Resume used": "",
+                                            "Notes": f"Exp: {j.get('Experience Required', '')}, Size: {j.get('Company Size', '')}",
+                                            "Confirmation evidence": ""
+                                        })
+                                        existing_urls.add(j_url)
+                                if new_entries:
+                                    with open(tracker_filepath, "a", newline="", encoding="utf-8") as tf:
+                                        writer = csv.DictWriter(tf, fieldnames=TRACKER_HEADERS)
+                                        writer.writerows(new_entries)
+                                    print(f"[✓] Recorded {len(new_entries)} new jobs in tracker: {tracker_filename}")
+                            print("[*] Closing browser debug session...")
+                            close_browser_session(browser)
+                            print("[✓] Browser debug session closed.")
+                        else:
+                            print("\n[-] No matching unapplied jobs found.")
+                            close_browser_session(browser)
+                if __name__ == "__main__":
+                    main()
+
+
+
+
+

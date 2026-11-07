@@ -1,0 +1,315 @@
+package com.jobscraper.scraper;
+
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
+import com.jobscraper.model.JobPost;
+import com.jobscraper.util.CompanySizeFilter;
+import com.microsoft.playwright.Page;
+
+import java.net.URLDecoder;
+import java.nio.charset.StandardCharsets;
+import java.util.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
+/**
+ * Scrapes jobs from LinkedIn based on candidate preferences.
+ */
+public class LinkedInScraper {
+
+    private static final Pattern COMPANY_SIZE_PATTERN = Pattern.compile("([\\d,]+(?:\\s*-\\s*[\\d,]+|\\+)?\\s+employees)", Pattern.CASE_INSENSITIVE);
+    private static final Pattern EXP_REQUIRED_PATTERN = Pattern.compile("(\\d+\\+?\\s*(?:to\\s*\\d+\\+?)?\\s*years?(?:\\s+of)?(?:\\s+\\w+)?\\s+experience)", Pattern.CASE_INSENSITIVE);
+    private static final Pattern DATE_POSTED_PATTERN = Pattern.compile("(\\d+\\s+(?:day|hour|minute|week|month)s?\\s+ago|\\d+[dhwm]\\s+ago)", Pattern.CASE_INSENSITIVE);
+
+    public static List<JobPost> scrape(Page page, String targetProfileName) {
+        List<JobPost> jobs = new ArrayList<>();
+        Set<String> seenUrls = new HashSet<>();
+
+        System.out.println("\n" + "=".repeat(60));
+        System.out.println("  LINKEDIN JOBS (Profile: " + targetProfileName + ")");
+        System.out.println("=".repeat(60));
+
+        try {
+            System.out.println("[*] Navigating to https://www.linkedin.com/jobs/ ...");
+            page.navigate("https://www.linkedin.com/jobs/", new Page.NavigateOptions().setTimeout(30000));
+            page.waitForTimeout(4000);
+
+            // Check if redirected to login/authwall
+            String currentUrl = page.url().toLowerCase();
+            if (currentUrl.contains("/login") || currentUrl.contains("/authwall") || currentUrl.contains("/checkpoint")) {
+                System.err.println("[!] ERROR: LinkedIn session is not logged in.");
+                System.err.println("[!] Please log into LinkedIn in Edge for profile '" + targetProfileName + "'.");
+                return jobs;
+            }
+
+            // Step 3: Find "Jobs based on your preferences" section and click "Show all ->"
+            System.out.println("[*] Finding 'Jobs based on your preferences' section and clicking 'Show all'...");
+            Boolean clicked = (Boolean) page.evaluate("() => {" +
+                    "  const headings = Array.from(document.querySelectorAll('h1, h2, h3, header, div, span'));" +
+                    "  const targetH = headings.find(h => h.innerText && h.innerText.trim().startsWith('Jobs based on your preferences'));" +
+                    "  if (targetH) {" +
+                    "    const section = targetH.closest('section') || targetH.closest('.artdeco-card') || targetH.closest('div');" +
+                    "    if (section) {" +
+                    "      const showAll = Array.from(section.querySelectorAll('a')).find(a => a.innerText && a.innerText.toLowerCase().includes('show all'));" +
+                    "      if (showAll) {" +
+                    "        showAll.click();" +
+                    "        return true;" +
+                    "      }" +
+                    "    }" +
+                    "  }" +
+                    "  const link = document.querySelector(\"a[href*='JobSearchOrigin_PREFERENCES_LANDING']\") ||" +
+                    "               document.querySelector(\"a[href*='PREFERENCES_LANDING']\");" +
+                    "  if (link) {" +
+                    "    link.click();" +
+                    "    return true;" +
+                    "  }" +
+                    "  return false;" +
+                    "}");
+
+            if (clicked == null || !clicked) {
+                System.out.println("[!] Attempting locator search for Preferences 'Show all' link...");
+                var prefLocator = page.locator("a[href*='PREFERENCES_LANDING']").first();
+                if (prefLocator.isVisible()) {
+                    prefLocator.click();
+                    clicked = true;
+                }
+            }
+
+            page.waitForTimeout(4000);
+            System.out.println("[*] Preferences search results loaded: " + page.url());
+
+            // Apply 'Past week' filter if not present
+            if (!page.url().contains("f_TPR=r604800")) {
+                System.out.println("[*] Applying 'Past week' filter...");
+                String sep = page.url().contains("?") ? "&" : "?";
+                page.navigate(page.url() + sep + "f_TPR=r604800");
+                page.waitForTimeout(3000);
+            }
+
+            // Scroll down jobs column to load listings
+            System.out.println("[*] Loading job listings via scroll...");
+            for (int i = 0; i < 4; i++) {
+                page.evaluate("() => {" +
+                        "  const col = document.querySelector(\"div[data-testid='lazy-column']\");" +
+                        "  if (col) col.scrollBy(0, 1000);" +
+                        "  else window.scrollBy(0, 800);" +
+                        "}");
+                page.waitForTimeout(1000);
+            }
+
+            // Step 4: Extract all job cards and their data
+            String cardsJson = (String) page.evaluate("() => {" +
+                    "  const col = document.querySelector(\"div[data-testid='lazy-column']\");" +
+                    "  const root = col || document;" +
+                    "  let buttons = Array.from(root.querySelectorAll(\"div[role='button']\")).filter(b => {" +
+                    "    const ck = b.getAttribute('componentkey') || '';" +
+                    "    return ck.startsWith('job-card-component-ref-');" +
+                    "  });" +
+                    "  if (buttons.length === 0) {" +
+                    "    buttons = Array.from(root.querySelectorAll('.jobs-search-results__list-item, li[data-occludable-job-id], div[data-job-id]'));" +
+                    "  }" +
+                    "  return JSON.stringify(buttons.map((b, idx) => {" +
+                    "    const ck = b.getAttribute('componentkey') || '';" +
+                    "    const jobId = ck.replace('job-card-component-ref-', '') || b.getAttribute('data-occludable-job-id') || b.getAttribute('data-job-id') || '';" +
+                    "    let title = '';" +
+                    "    const titleSpan = b.querySelector(\"span[aria-hidden='true']\");" +
+                    "    if (titleSpan) title = titleSpan.innerText.trim();" +
+                    "    if (!title) {" +
+                    "      const dismissBtn = b.querySelector(\"button[aria-label*='Dismiss']\");" +
+                    "      if (dismissBtn) {" +
+                    "        const al = dismissBtn.getAttribute('aria-label') || '';" +
+                    "        title = al.replace(/^Dismiss\\s+/i, '').replace(/\\s+job$/i, '').trim();" +
+                    "      }" +
+                    "    }" +
+                    "    if (!title) {" +
+                    "      const lines = b.innerText.split('\\n').map(l => l.trim()).filter(Boolean);" +
+                    "      let raw = lines[0] || '';" +
+                    "      title = raw.replace(/^Selected,\\s*/i, '').replace(/\\(Verified job\\)/gi, '').trim();" +
+                    "    }" +
+                    "    const paras = Array.from(b.querySelectorAll('p')).filter(p => {" +
+                    "      const txt = p.innerText.trim();" +
+                    "      if (!txt) return false;" +
+                    "      if (title && (txt === title || txt.includes(title))) return false;" +
+                    "      if (p.querySelector(\"span[aria-hidden='true']\")) return false;" +
+                    "      if (p.querySelector('button, svg, figure')) return false;" +
+                    "      if (txt.includes('connection works here') || txt.includes('alumni work here') ||" +
+                    "          txt.includes('Viewed') || txt.includes('Be an early applicant') ||" +
+                    "          txt.includes('Actively reviewing applicants') || txt.includes('Easy Apply') ||" +
+                    "          txt === '·' || txt === '•') return false;" +
+                    "      return true;" +
+                    "    }).map(p => p.innerText.trim());" +
+                    "    let company = paras[0] || '';" +
+                    "    let location = paras[1] || '';" +
+                    "    if (!company || !location) {" +
+                    "      const lines = b.innerText.split('\\n').map(l => l.trim()).filter(Boolean);" +
+                    "      const clean = lines.filter(l => !['(Verified job)', 'Be an early applicant', 'Easy Apply', 'Actively reviewing applicants', 'Viewed', '·', '•'].includes(l));" +
+                    "      if (!company && clean.length > 1) company = clean[1];" +
+                    "      if (!location && clean.length > 2) location = clean[2];" +
+                    "    }" +
+                    "    return {" +
+                    "      index: idx," +
+                    "      jobId: jobId," +
+                    "      title: title," +
+                    "      company: company," +
+                    "      location: location," +
+                    "      fullText: b.innerText" +
+                    "    };" +
+                    "  }));" +
+                    "}");
+
+            if (cardsJson == null || cardsJson.isBlank()) {
+                System.out.println("[-] No job cards detected on preferences page.");
+                return jobs;
+            }
+
+            JsonArray cards = JsonParser.parseString(cardsJson).getAsJsonArray();
+            System.out.println("[*] Found " + cards.size() + " listings in preferences results.");
+
+            for (JsonElement el : cards) {
+                try {
+                    JsonObject card = el.getAsJsonObject();
+                    String jobId = card.has("jobId") ? card.get("jobId").getAsString() : "";
+                    String title = card.has("title") ? card.get("title").getAsString().trim() : "";
+                    String company = card.has("company") ? card.get("company").getAsString().trim() : "";
+                    String location = card.has("location") ? card.get("location").getAsString().trim() : "";
+                    String fullText = card.has("fullText") ? card.get("fullText").getAsString() : "";
+                    int index = card.get("index").getAsInt();
+
+                    if (title.isBlank() || title.equalsIgnoreCase("N/A") || company.isBlank()) {
+                        continue;
+                    }
+
+                    // Check if already applied
+                    boolean applied = false;
+                    for (String line : fullText.split("\\n")) {
+                        String l = line.trim().toLowerCase();
+                        if (l.equals("applied") || l.equals("application submitted") || l.startsWith("applied on") || l.startsWith("applied yesterday")) {
+                            applied = true;
+                            break;
+                        }
+                    }
+                    if (applied) {
+                        continue;
+                    }
+
+                    String jobUrl = !jobId.isBlank() ? "https://www.linkedin.com/jobs/view/" + jobId + "/" : page.url();
+                    if (seenUrls.contains(jobUrl)) {
+                        continue;
+                    }
+
+                    // Click on the job card to load right detail pane
+                    String detailJson = (String) page.evaluate("([jid, idx]) => {" +
+                            "  let btn = document.querySelector(`div[role='button'][componentkey*='${jid}']`);" +
+                            "  if (!btn) {" +
+                            "    const col = document.querySelector(\"div[data-testid='lazy-column']\");" +
+                            "    const root = col || document;" +
+                            "    const all = Array.from(root.querySelectorAll(\"div[role='button'][componentkey^='job-card-component-ref-'], .jobs-search-results__list-item, li[data-occludable-job-id]\"));" +
+                            "    if (idx < all.length) btn = all[idx];" +
+                            "  }" +
+                            "  if (btn) btn.click();" +
+                            "  return JSON.stringify({ clicked: !!btn });" +
+                            "}", List.of(jobId, index));
+
+                    page.waitForTimeout(600);
+
+                    // Inspect details pane for apply URL, company size, experience, and full text
+                    String paneInfoJson = (String) page.evaluate("() => {" +
+                            "  const applyBtn = document.querySelector('.jobs-apply-button, button[aria-label*=\"Apply\"], a[aria-label*=\"Apply\"], .jobs-s-apply button');" +
+                            "  let applyUrl = '';" +
+                            "  if (applyBtn) {" +
+                            "    if (applyBtn.tagName === 'A' && applyBtn.getAttribute('href')) {" +
+                            "      applyUrl = applyBtn.getAttribute('href');" +
+                            "    } else if (applyBtn.innerText && applyBtn.innerText.toLowerCase().includes('easy apply')) {" +
+                            "      applyUrl = 'Easy Apply';" +
+                            "    } else {" +
+                            "      applyUrl = (applyBtn.getAttribute('aria-label') || applyBtn.innerText || 'Apply').trim();" +
+                            "    }" +
+                            "  }" +
+                            "  // Detail pane text\n" +
+                            "  let parent = applyBtn ? applyBtn.parentElement : null;" +
+                            "  let detailContainer = null;" +
+                            "  while (parent && parent !== document.body) {" +
+                            "    if (parent.innerText && parent.innerText.includes('About the job')) {" +
+                            "      detailContainer = parent;" +
+                            "      break;" +
+                            "    }" +
+                            "    parent = parent.parentElement;" +
+                            "  }" +
+                            "  const text = detailContainer ? detailContainer.innerText : (document.body.innerText || '');" +
+                            "  return JSON.stringify({" +
+                            "    applyUrl: applyUrl," +
+                            "    detailText: text.substring(0, 3000)" +
+                            "  });" +
+                            "}");
+
+                    String detailText = "";
+                    String applyUrl = "";
+                    if (paneInfoJson != null) {
+                        JsonObject paneObj = JsonParser.parseString(paneInfoJson).getAsJsonObject();
+                        applyUrl = paneObj.has("applyUrl") ? paneObj.get("applyUrl").getAsString() : "";
+                        detailText = paneObj.has("detailText") ? paneObj.get("detailText").getAsString() : "";
+                    }
+
+                    // Decode safety redirect apply URL if present
+                    if (applyUrl.contains("linkedin.com/safety/go/?url=")) {
+                        try {
+                            int start = applyUrl.indexOf("url=") + 4;
+                            int end = applyUrl.indexOf("&", start);
+                            String rawUrl = end > start ? applyUrl.substring(start, end) : applyUrl.substring(start);
+                            applyUrl = URLDecoder.decode(rawUrl, StandardCharsets.UTF_8);
+                        } catch (Exception ignored) {}
+                    }
+
+                    // Extract date posted
+                    Matcher dateMatcher = DATE_POSTED_PATTERN.matcher(fullText);
+                    String datePosted = dateMatcher.find() ? dateMatcher.group(0) : "Past week";
+
+                    // Extract Company Size
+                    String companySize = "";
+                    Matcher csMatcher = COMPANY_SIZE_PATTERN.matcher(detailText);
+                    if (csMatcher.find()) {
+                        companySize = csMatcher.group(0).trim();
+                    }
+
+                    // Company size filter
+                    if (CompanySizeFilter.isSmallCompany(companySize)) {
+                        System.out.println("    [-] Skipping small company: " + company + " (" + companySize + ")");
+                        continue;
+                    }
+
+                    // Extract Experience Required
+                    String expReq = "";
+                    Matcher expMatcher = EXP_REQUIRED_PATTERN.matcher(detailText);
+                    if (expMatcher.find()) {
+                        expReq = expMatcher.group(0).trim();
+                    }
+
+                    seenUrls.add(jobUrl);
+                    JobPost post = new JobPost(
+                            "LinkedIn",
+                            title,
+                            company,
+                            location,
+                            expReq,
+                            companySize,
+                            datePosted,
+                            jobUrl,
+                            applyUrl
+                    );
+                    jobs.add(post);
+                    System.out.println("    [+] Collected: " + title + " @ " + company + " (" + location + ") | Size: " + companySize);
+                } catch (Exception e) {
+                    System.err.println("    [!] Error parsing LinkedIn card: " + e.getMessage());
+                }
+            }
+
+        } catch (Exception e) {
+            System.err.println("[!] Error during LinkedIn scraping: " + e.getMessage());
+        }
+
+        System.out.println("[✓] LinkedIn scraping finished. Collected " + jobs.size() + " jobs.\n");
+        return jobs;
+    }
+}
