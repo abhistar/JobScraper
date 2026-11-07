@@ -7,6 +7,7 @@ import com.google.gson.JsonParser;
 import com.jobscraper.model.JobPost;
 import com.jobscraper.util.CompanySizeFilter;
 import com.microsoft.playwright.Page;
+import com.microsoft.playwright.options.WaitUntilState;
 
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
@@ -33,7 +34,8 @@ public class LinkedInScraper {
 
         try {
             System.out.println("[*] Navigating to https://www.linkedin.com/jobs/ ...");
-            page.navigate("https://www.linkedin.com/jobs/", new Page.NavigateOptions().setTimeout(30000));
+            page.navigate("https://www.linkedin.com/jobs/",
+                    new Page.NavigateOptions().setWaitUntil(WaitUntilState.DOMCONTENTLOADED).setTimeout(30000));
             page.waitForTimeout(4000);
 
             // Check if redirected to login/authwall
@@ -83,9 +85,35 @@ public class LinkedInScraper {
             // Apply 'Past week' filter if not present
             if (!page.url().contains("f_TPR=r604800")) {
                 System.out.println("[*] Applying 'Past week' filter...");
-                String sep = page.url().contains("?") ? "&" : "?";
-                page.navigate(page.url() + sep + "f_TPR=r604800");
+                // Open Date posted dropdown
+                page.evaluate("() => {" +
+                        "  const btn = document.querySelector(\"div[role='button'][aria-label*='Date posted']\") ||" +
+                        "              document.querySelector(\"[aria-label*='Filter by Date posted']\") ||" +
+                        "              Array.from(document.querySelectorAll(\"div[role='button'], button, label\")).find(el => el.innerText && el.innerText.trim() === 'Date posted');" +
+                        "  if (btn) btn.click();" +
+                        "}");
+                page.waitForTimeout(1200);
+                // Select Past week radio
+                page.evaluate("() => {" +
+                        "  const radio = document.querySelector(\"input[aria-label='Past week']\") ||" +
+                        "                Array.from(document.querySelectorAll(\"label, span, p\")).find(el => el.innerText && el.innerText.trim() === 'Past week');" +
+                        "  if (radio) radio.click();" +
+                        "}");
+                page.waitForTimeout(800);
+                // Click Show results button
+                page.evaluate("() => {" +
+                        "  const showBtn = Array.from(document.querySelectorAll(\"a, button\")).find(el => el.innerText && el.innerText.includes('Show results'));" +
+                        "  if (showBtn) showBtn.click();" +
+                        "}");
                 page.waitForTimeout(3000);
+
+                // Fallback to query parameter navigation if not yet applied
+                if (!page.url().contains("f_TPR=r604800")) {
+                    String sep = page.url().contains("?") ? "&" : "?";
+                    page.navigate(page.url() + sep + "f_TPR=r604800",
+                            new Page.NavigateOptions().setWaitUntil(WaitUntilState.DOMCONTENTLOADED).setTimeout(20000));
+                    page.waitForTimeout(2500);
+                }
             }
 
             // Scroll down jobs column to load listings
@@ -199,20 +227,30 @@ public class LinkedInScraper {
                         continue;
                     }
 
+                    if (page.isClosed()) {
+                        System.err.println("[!] Page closed unexpectedly. Halting card parsing.");
+                        break;
+                    }
+
                     // Click on the job card to load right detail pane
                     String detailJson = (String) page.evaluate("([jid, idx]) => {" +
                             "  let btn = document.querySelector(`div[role='button'][componentkey*='${jid}']`);" +
                             "  if (!btn) {" +
                             "    const col = document.querySelector(\"div[data-testid='lazy-column']\");" +
                             "    const root = col || document;" +
-                            "    const all = Array.from(root.querySelectorAll(\"div[role='button'][componentkey^='job-card-component-ref-'], .jobs-search-results__list-item, li[data-occludable-job-id]\"));" +
+                            "    const all = Array.from(root.querySelectorAll(\"div[role='button'][componentkey^='job-card-component-ref-']\"));" +
                             "    if (idx < all.length) btn = all[idx];" +
                             "  }" +
-                            "  if (btn) btn.click();" +
+                            "  if (btn) {" +
+                            "    if (btn.tagName === 'A' && btn.getAttribute('href')) {" +
+                            "      btn.addEventListener('click', e => e.preventDefault(), { once: true });" +
+                            "    }" +
+                            "    btn.click();" +
+                            "  }" +
                             "  return JSON.stringify({ clicked: !!btn });" +
                             "}", List.of(jobId, index));
 
-                    page.waitForTimeout(600);
+                    page.waitForTimeout(800);
 
                     // Inspect details pane for apply URL, company size, experience, and full text
                     String paneInfoJson = (String) page.evaluate("() => {" +
@@ -302,6 +340,10 @@ public class LinkedInScraper {
                     System.out.println("    [+] Collected: " + title + " @ " + company + " (" + location + ") | Size: " + companySize);
                 } catch (Exception e) {
                     System.err.println("    [!] Error parsing LinkedIn card: " + e.getMessage());
+                    if (page.isClosed()) {
+                        System.err.println("[!] LinkedIn page is closed. Stopping card iteration.");
+                        break;
+                    }
                 }
             }
 

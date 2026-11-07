@@ -7,6 +7,7 @@ import com.google.gson.JsonParser;
 import com.jobscraper.model.JobPost;
 import com.jobscraper.util.CompanySizeFilter;
 import com.microsoft.playwright.Page;
+import com.microsoft.playwright.options.WaitUntilState;
 
 import java.util.*;
 
@@ -25,7 +26,8 @@ public class InstahyreScraper {
 
         try {
             System.out.println("[*] Navigating to https://www.instahyre.com/candidate/opportunities/ ...");
-            page.navigate("https://www.instahyre.com/candidate/opportunities/", new Page.NavigateOptions().setTimeout(30000));
+            page.navigate("https://www.instahyre.com/candidate/opportunities/",
+                    new Page.NavigateOptions().setWaitUntil(WaitUntilState.DOMCONTENTLOADED).setTimeout(30000));
             page.waitForTimeout(4000);
 
             // Scroll down to load all opportunities

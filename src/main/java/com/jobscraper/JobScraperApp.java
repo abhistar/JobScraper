@@ -59,6 +59,8 @@ public class JobScraperApp {
 
         EdgeBrowserLauncher launcher = new EdgeBrowserLauncher();
         List<JobPost> allJobs = new ArrayList<>();
+        List<JobPost> linkedInJobs = new ArrayList<>();
+        List<JobPost> instahyreJobs = new ArrayList<>();
 
         try {
             // Launch or connect to Edge debug session
@@ -67,16 +69,31 @@ public class JobScraperApp {
             Page page = context.newPage();
 
             // Step 3 & 4: Scrape LinkedIn
-            List<JobPost> linkedInJobs = LinkedInScraper.scrape(page, normalizedProfile);
-            allJobs.addAll(linkedInJobs);
+            try {
+                linkedInJobs = LinkedInScraper.scrape(page, normalizedProfile);
+                allJobs.addAll(linkedInJobs);
+            } catch (Exception e) {
+                System.err.println("[!] Error during LinkedIn scraping: " + e.getMessage());
+            }
 
             // Step 3 & 4: Scrape Instahyre
-            List<JobPost> instahyreJobs = InstahyreScraper.scrape(page, normalizedProfile);
-            allJobs.addAll(instahyreJobs);
-
             try {
-                page.close();
-            } catch (Exception ignored) {}
+                if (!browser.isConnected()) {
+                    browser = launcher.connectOrLaunch(profile);
+                    context = !browser.contexts().isEmpty() ? browser.contexts().get(0) : browser.newContext();
+                    page = context.newPage();
+                } else if (page.isClosed()) {
+                    page = context.newPage();
+                }
+                instahyreJobs = InstahyreScraper.scrape(page, normalizedProfile);
+                allJobs.addAll(instahyreJobs);
+            } catch (Exception e) {
+                System.err.println("[!] Error during Instahyre scraping: " + e.getMessage());
+            } finally {
+                try {
+                    page.close();
+                } catch (Exception ignored) {}
+            }
 
             // Step 5: Save all collected jobs to CSV
             File repoDir = new File(System.getProperty("user.dir"));

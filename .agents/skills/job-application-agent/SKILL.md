@@ -127,30 +127,65 @@ Prioritize jobs with:
 
 ---
 
-## 5. Browser agent instructions
+## 5. Mandatory Browser Subagent Delegation
 
-Use the /browser agent to open job URLs and interact with application websites.
+Browser interaction MUST be performed by the dedicated Antigravity Browser Subagent.
 
-For each shortlisted job:
+### Mandatory invocation rules
 
-1. Open the actual job URL from the CSV.
-2. Verify the job is still available.
-3. Confirm that the job matches my criteria.
-4. Confirm that I have not already applied.
-5. Review the job description.
-6. Navigate to the application form.
-7. Fill out the application using my resume and personal details.
-8. Upload my resume when requested.
-9. Answer application questions accurately.
-10. Submit the application.
+- Do not navigate to job application websites using the main agent's browser tools.
+- Do not use web search, HTTP requests, curl, APIs, or scripts to interact with job application websites.
+- Do not simulate browser interactions using JavaScript, Playwright, Selenium, or Python.
+- You MUST delegate website navigation and interaction to the dedicated `browser` subagent.
+- Invoke the `/browser` command explicitly through Antigravity's browser subagent mechanism. Merely mentioning `/browser` in your reasoning or instructions does not count as invocation.
+- Do not proceed with website interaction if the browser subagent is unavailable.
 
-Do not use scripts to automate browser interactions.
+### Delegation workflow
 
-Do not bypass CAPTCHA, authentication, website restrictions, or anti-bot controls.
+For every shortlisted job:
 
-If a website requires login, ask me to sign in through the browser.
+1. Prepare the following information:
+    - Job title
+    - Company
+    - Job URL
+    - Location
+    - Relevant candidate profile information
+    - Resume file path
 
-If a website requires additional information that is not provided, stop and ask me.
+2. Explicitly invoke the Browser Subagent with a task containing the job URL and the required application workflow.
+
+3. Instruct the Browser Subagent to:
+    - Open the supplied job URL.
+    - Verify that the listing is active.
+    - Inspect the job description.
+    - Check whether the candidate has already applied.
+    - Navigate to the application form.
+    - Fill out the form using the supplied candidate profile.
+    - Upload the supplied resume when required.
+    - Report any missing information or manual intervention requirements.
+    - Submit only when authorized by the application approval policy.
+    - Verify the submission confirmation.
+
+4. Wait for the Browser Subagent to finish before processing its result.
+
+5. Update the application tracker using the actual result returned by the Browser Subagent.
+
+### Browser delegation failure
+
+If the Browser Subagent cannot be invoked:
+
+- Stop website application processing.
+- Do not silently fall back to another browser tool.
+- Do not use scripts as an alternative.
+- Report that browser delegation failed and explain the reason.
+- Continue only after browser access is restored.
+
+### Browser interaction restrictions
+
+- Do not bypass CAPTCHA, authentication, or anti-bot controls.
+- Ask the user to sign in when authentication is required.
+- Never fabricate application submission confirmations.
+- Never mark an application as submitted without visible confirmation evidence.
 
 ---
 
