@@ -31,3 +31,13 @@ target/
 
 # Generatred output files
 *.csv
+
+# Stored resume files
+resume/*.pdf
+resume/*.docx
+resume/*.doc
+resume/*.odf
+
+# Profile data
+profiles/*.md
+!profiles/template_profile.md
