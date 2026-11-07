@@ -43,6 +43,10 @@ Verify / check a specific profile (checks that profile is only among "Abhinav" o
 mvn exec:java -Dexec.mainClass="com.jobscraper.ProfileChecker" -Dexec.args="--profile=Abhinav"
 mvn exec:java -Dexec.mainClass="com.jobscraper.ProfileChecker" -Dexec.args="--profile=Anushree"
 
+# Check profile and launch Edge with that profile if not already open:
+mvn exec:java -Dexec.mainClass="com.jobscraper.ProfileChecker" -Dexec.args="--profile=Abhinav --open"
+mvn exec:java -Dexec.mainClass="com.jobscraper.ProfileChecker" -Dexec.args="--profile=Anushree --open"
+
 # Disallowed profiles will be rejected:
 mvn exec:java -Dexec.mainClass="com.jobscraper.ProfileChecker" -Dexec.args="--profile=Unknown"
 ```

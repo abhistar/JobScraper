@@ -93,8 +93,8 @@ public class InstahyreScraper {
                     "    const locEl = row.querySelector('.chip-location, .employer-chips-location');" +
                     "    if (locEl && !location) location = locEl.innerText.trim();" +
                     "    " +
-                    "    const sizeEl = row.querySelector('.chip-employees');" +
-                    "    if (sizeEl) companySize = sizeEl.innerText.trim();" +
+                    "    const sizeEl = row.querySelector('.chip-employees, .employer-chips-employees, [ng-bind*=\"employee_count\"]');" +
+                    "    if (sizeEl && !companySize) companySize = sizeEl.innerText.trim();" +
                     "    " +
                     "    const dateEl = row.querySelector('.status-date, .date');" +
                     "    if (dateEl && !datePosted) datePosted = dateEl.innerText.trim();" +
@@ -143,9 +143,9 @@ public class InstahyreScraper {
                         continue;
                     }
 
-                    // Company size filter
-                    if (CompanySizeFilter.isSmallCompany(companySize)) {
-                        System.out.println("    [-] Skipping small company: " + company + " (" + companySize + ")");
+                    // Company size filter (minimum 500 employees)
+                    if (!CompanySizeFilter.meetsMinimumCompanySize(companySize)) {
+                        System.out.println("    [-] Skipping company with < 500 employees: " + company + " (" + (companySize.isBlank() ? "unknown size" : companySize) + ")");
                         continue;
                     }
 

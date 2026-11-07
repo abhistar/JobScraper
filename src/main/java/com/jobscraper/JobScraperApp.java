@@ -4,6 +4,7 @@ import com.jobscraper.model.EdgeProfile;
 import com.jobscraper.model.JobPost;
 import com.jobscraper.scraper.InstahyreScraper;
 import com.jobscraper.scraper.LinkedInScraper;
+import com.jobscraper.util.CompanySizeFilter;
 import com.jobscraper.util.CsvWriter;
 import com.jobscraper.util.EdgeBrowserLauncher;
 import com.jobscraper.util.EdgeProfileManager;
@@ -95,17 +96,26 @@ public class JobScraperApp {
                 } catch (Exception ignored) {}
             }
 
-            // Step 5: Save all collected jobs to CSV
+            // Step 5: Save all collected jobs to CSV (guaranteeing >= 500 employees)
+            List<JobPost> verifiedJobs = new ArrayList<>();
+            for (JobPost job : allJobs) {
+                if (CompanySizeFilter.meetsMinimumCompanySize(job.companySize())) {
+                    verifiedJobs.add(job);
+                } else {
+                    System.out.println("[!] Dropping job failing >= 500 company size requirement: " + job.company() + " (" + job.companySize() + ")");
+                }
+            }
+
             File repoDir = new File(System.getProperty("user.dir"));
-            File csvFile = CsvWriter.writeJobsToCsv(allJobs, normalizedProfile, repoDir);
+            File csvFile = CsvWriter.writeJobsToCsv(verifiedJobs, normalizedProfile, repoDir);
 
             System.out.println("\n" + "=".repeat(65));
             System.out.println("[✓] SCRAPING SUMMARY");
             System.out.println("=".repeat(65));
             System.out.println("Profile:       " + normalizedProfile);
-            System.out.println("Total Jobs:    " + allJobs.size());
-            System.out.println("  - LinkedIn:  " + linkedInJobs.size());
-            System.out.println("  - Instahyre: " + instahyreJobs.size());
+            System.out.println("Total Jobs:    " + verifiedJobs.size());
+            System.out.println("  - LinkedIn:  " + verifiedJobs.stream().filter(j -> "LinkedIn".equalsIgnoreCase(j.source())).count());
+            System.out.println("  - Instahyre: " + verifiedJobs.stream().filter(j -> "Instahyre".equalsIgnoreCase(j.source())).count());
             System.out.println("Output File:   " + csvFile.getAbsolutePath());
             System.out.println("=".repeat(65) + "\n");
 

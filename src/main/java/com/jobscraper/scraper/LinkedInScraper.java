@@ -234,27 +234,44 @@ public class LinkedInScraper {
 
                     // Click on the job card to load right detail pane
                     String detailJson = (String) page.evaluate("([jid, idx]) => {" +
-                            "  let btn = document.querySelector(`div[role='button'][componentkey*='${jid}']`);" +
-                            "  if (!btn) {" +
-                            "    const col = document.querySelector(\"div[data-testid='lazy-column']\");" +
-                            "    const root = col || document;" +
-                            "    const all = Array.from(root.querySelectorAll(\"div[role='button'][componentkey^='job-card-component-ref-']\"));" +
-                            "    if (idx < all.length) btn = all[idx];" +
+                            "  const col = document.querySelector(\"div[data-testid='lazy-column']\");" +
+                            "  const root = col || document;" +
+                            "  let card = null;" +
+                            "  if (jid) {" +
+                            "    card = root.querySelector(`div[role='button'][componentkey*='${jid}']`) ||" +
+                            "           root.querySelector(`[componentkey*='${jid}']`) ||" +
+                            "           root.querySelector(`li[data-occludable-job-id*='${jid}']`) ||" +
+                            "           root.querySelector(`[data-job-id='${jid}']`);" +
                             "  }" +
-                            "  if (btn) {" +
-                            "    if (btn.tagName === 'A' && btn.getAttribute('href')) {" +
-                            "      btn.addEventListener('click', e => e.preventDefault(), { once: true });" +
-                            "    }" +
+                            "  if (!card) {" +
+                            "    const all = Array.from(root.querySelectorAll(" +
+                            "      \"div[role='button'][componentkey^='job-card-component-ref-'], \" +" +
+                            "      \".jobs-search-results__list-item, \" +" +
+                            "      \"li[data-occludable-job-id], \" +" +
+                            "      \"div[data-job-id]\"" +
+                            "    ));" +
+                            "    if (idx < all.length) card = all[idx];" +
+                            "  }" +
+                            "  if (card) {" +
+                            "    card.scrollIntoView({ block: 'nearest' });" +
+                            "    const btn = card.querySelector(\"div[role='button']\") || card;" +
                             "    btn.click();" +
+                            "    return JSON.stringify({ clicked: true });" +
                             "  }" +
-                            "  return JSON.stringify({ clicked: !!btn });" +
+                            "  return JSON.stringify({ clicked: false });" +
                             "}", List.of(jobId, index));
 
-                    page.waitForTimeout(800);
+                    page.waitForTimeout(1200);
 
                     // Inspect details pane for apply URL, company size, experience, and full text
                     String paneInfoJson = (String) page.evaluate("() => {" +
-                            "  const applyBtn = document.querySelector('.jobs-apply-button, button[aria-label*=\"Apply\"], a[aria-label*=\"Apply\"], .jobs-s-apply button');" +
+                            "  const applyBtn = document.querySelector(" +
+                            "    '.jobs-apply-button, ' +" +
+                            "    'button[aria-label*=\"Apply\"], ' +" +
+                            "    'a[aria-label*=\"Apply\"], ' +" +
+                            "    '.jobs-s-apply button, ' +" +
+                            "    'button.jobs-apply-button' " +
+                            "  );" +
                             "  let applyUrl = '';" +
                             "  if (applyBtn) {" +
                             "    if (applyBtn.tagName === 'A' && applyBtn.getAttribute('href')) {" +
@@ -265,29 +282,89 @@ public class LinkedInScraper {
                             "      applyUrl = (applyBtn.getAttribute('aria-label') || applyBtn.innerText || 'Apply').trim();" +
                             "    }" +
                             "  }" +
-                            "  // Detail pane text\n" +
-                            "  let parent = applyBtn ? applyBtn.parentElement : null;" +
-                            "  let detailContainer = null;" +
-                            "  while (parent && parent !== document.body) {" +
-                            "    if (parent.innerText && parent.innerText.includes('About the job')) {" +
-                            "      detailContainer = parent;" +
-                            "      break;" +
+                            "  " +
+                            "  let detailContainer = document.querySelector(" +
+                            "    '.jobs-search__job-details, ' +" +
+                            "    '.jobs-search__job-details--container, ' +" +
+                            "    '.scaffold-layout__detail, ' +" +
+                            "    '.job-view-layout, ' +" +
+                            "    'main .jobs-details, ' +" +
+                            "    '[data-view-name=\"job-details\"], ' +" +
+                            "    '.jobs-details__main-content' " +
+                            "  );" +
+                            "  if (!detailContainer && applyBtn) {" +
+                            "    let p = applyBtn.parentElement;" +
+                            "    while (p && p !== document.body) {" +
+                            "      if (p.innerText && p.innerText.includes('About the job')) {" +
+                            "        detailContainer = p;" +
+                            "        break;" +
+                            "      }" +
+                            "      p = p.parentElement;" +
                             "    }" +
-                            "    parent = parent.parentElement;" +
                             "  }" +
-                            "  const text = detailContainer ? detailContainer.innerText : (document.body.innerText || '');" +
+                            "  " +
+                            "  // Extract Company Size\n" +
+                            "  let companySize = '';" +
+                            "  const sizePattern = /([\\d,]+(?:\\s*-\\s*[\\d,]+|\\+)?\\s+employees?)/i;" +
+                            "  if (detailContainer) {" +
+                            "    const specificEls = Array.from(detailContainer.querySelectorAll(" +
+                            "      '.job-details-jobs-unified-top-card__job-insight, ' +" +
+                            "      '.jobs-unified-top-card__job-insight, ' +" +
+                            "      '.job-details-jobs-unified-top-card__primary-description-container li, ' +" +
+                            "      '.jobs-company__box, ' +" +
+                            "      '.jobs-company' " +
+                            "    ));" +
+                            "    for (const el of specificEls) {" +
+                            "      const t = el.innerText ? el.innerText.trim() : '';" +
+                            "      const m = t.match(sizePattern);" +
+                            "      if (m) {" +
+                            "        companySize = m[1].trim();" +
+                            "        break;" +
+                            "      }" +
+                            "    }" +
+                            "    if (!companySize) {" +
+                            "      const fullTxt = detailContainer.innerText || '';" +
+                            "      const m = fullTxt.match(sizePattern);" +
+                            "      if (m) companySize = m[1].trim();" +
+                            "    }" +
+                            "  }" +
+                            "  " +
+                            "  const fullDetailText = detailContainer ? detailContainer.innerText : '';" +
                             "  return JSON.stringify({" +
                             "    applyUrl: applyUrl," +
-                            "    detailText: text.substring(0, 3000)" +
+                            "    companySize: companySize," +
+                            "    detailText: fullDetailText.substring(0, 10000)" +
                             "  });" +
                             "}");
 
                     String detailText = "";
                     String applyUrl = "";
+                    String companySize = "";
                     if (paneInfoJson != null) {
                         JsonObject paneObj = JsonParser.parseString(paneInfoJson).getAsJsonObject();
                         applyUrl = paneObj.has("applyUrl") ? paneObj.get("applyUrl").getAsString() : "";
+                        companySize = paneObj.has("companySize") ? paneObj.get("companySize").getAsString() : "";
                         detailText = paneObj.has("detailText") ? paneObj.get("detailText").getAsString() : "";
+                    }
+
+                    if (companySize.isBlank()) {
+                        Matcher csMatcher = COMPANY_SIZE_PATTERN.matcher(detailText);
+                        if (csMatcher.find()) {
+                            companySize = csMatcher.group(0).trim();
+                        }
+                    }
+
+                    if (companySize.isBlank()) {
+                        page.waitForTimeout(600);
+                        String retrySize = (String) page.evaluate("() => {" +
+                                "  const dc = document.querySelector('.jobs-search__job-details, .scaffold-layout__detail, .job-view-layout, main .jobs-details');" +
+                                "  const txt = dc ? dc.innerText : '';" +
+                                "  const m = txt.match(/([\\d,]+(?:\\s*-\\s*[\\d,]+|\\+)?\\s+employees?)/i);" +
+                                "  return m ? m[1].trim() : '';" +
+                                "}");
+                        if (retrySize != null && !retrySize.isBlank()) {
+                            companySize = retrySize.trim();
+                        }
                     }
 
                     // Decode safety redirect apply URL if present
@@ -304,16 +381,9 @@ public class LinkedInScraper {
                     Matcher dateMatcher = DATE_POSTED_PATTERN.matcher(fullText);
                     String datePosted = dateMatcher.find() ? dateMatcher.group(0) : "Past week";
 
-                    // Extract Company Size
-                    String companySize = "";
-                    Matcher csMatcher = COMPANY_SIZE_PATTERN.matcher(detailText);
-                    if (csMatcher.find()) {
-                        companySize = csMatcher.group(0).trim();
-                    }
-
-                    // Company size filter
-                    if (CompanySizeFilter.isSmallCompany(companySize)) {
-                        System.out.println("    [-] Skipping small company: " + company + " (" + companySize + ")");
+                    // Company size filter (minimum 500 employees)
+                    if (!CompanySizeFilter.meetsMinimumCompanySize(companySize)) {
+                        System.out.println("    [-] Skipping company with < 500 employees: " + company + " (" + (companySize.isBlank() ? "unknown size" : companySize) + ")");
                         continue;
                     }
 

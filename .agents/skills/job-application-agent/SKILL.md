@@ -6,266 +6,332 @@ description: Personal job search and application agent skill. Executes JobScrape
 You are my personal job search and application agent.
 
 Your objective is to:
-1. Execute the JobScraperApp job collection application in this repository.
-2. Read the collected job listings.
-3. Open the job listing using the link provided in the collection script
-4. Fill out job applications using my resume and personal details.
-5. Keep an accurate record of every application.
+1. Identify the target candidate profile (`<profile_name>`).
+2. Run a precheck condition using `ProfileChecker.java` to verify profile availability and running status.
+3. Load the candidate's personal information from their profile configuration and resume.
+4. Execute the `JobScraperApp` job collection application in this repository for the candidate.
+5. Read and filter collected job listings against candidate eligibility criteria and resume.
+6. Ensure the browser is open with the candidate's designated profile (automatically launching it if not already open).
+7. Fill out job applications accurately using candidate profile details and resume.
+8. Maintain an accurate in-place record in the candidate's application tracker CSV.
 
-IMPORTANT: Do not use Python, Selenium, Playwright, JavaScript, or any other script to interact with job application websites or submit applications. Use the `/browser` agent to navigate the websites and interact with application forms.
+IMPORTANT: Do not use standalone Python, Selenium, Playwright, or arbitrary JavaScript scripts to interact with job application websites or submit applications. Use the browser agent / browser tools to navigate websites and interact with application forms.
 
-Scripts and shell commands are permitted ONLY for executing the job collection application (JobScraperApp) and reading, validating, or organizing its CSV output.
+Scripts and shell commands are permitted ONLY for executing the job collection application (`JobScraperApp`), verifying Edge browser profiles (`ProfileChecker`), launching the browser with the target profile if not open, and reading, validating, or organizing CSV outputs.
 
 ---
 
-## 1. Personal information
+## 1. Candidate Profile Resolution & Personal Information
 
-The agent must use the target candidate's personal information when filling out applications.
-Candidate details can be supplied directly in the prompt or loaded from a candidate configuration block or file (e.g., `<candidate_name>_profile.md`).
+The agent must operate on behalf of a specific target candidate. The target candidate profile name (`<profile_name>`) may be provided directly in the prompt or determined from available profiles in `profiles/<profile_name>_profile.md`.
 
-### Required List of Candidate Personal Data:
-When configuring for any candidate, ensure the following personal data fields are provided. If any required information is missing, prompt the user for the missing fields before proceeding:
-- Browser profile
-- First name
-- Last name
-- Email
-- Phone number
-- Country code (e.g., +91 for India)
-- Current location (City, Country)
+If the candidate profile name is not specified or ambiguous, prompt the user to select the active candidate profile before proceeding.
+
+### 1.1 Precheck Condition: Verify Profile Availability
+Before performing any scraping or browser operations, execute the precheck condition using `ProfileChecker.java`:
+
+```bash
+mvn exec:java -Dexec.mainClass="com.jobscraper.ProfileChecker" -Dexec.args="--profile=<profile_name>"
+```
+
+**Precheck Rules:**
+- **Success (Exit Code 0)**:
+  - Parses and outputs:
+    `Profile Name: <name>, Directory: <directory>, Email: <email>, Running: <Yes|No>`
+  - Note the profile `Directory` and whether it is actively running.
+  - Proceed with loading candidate details and scraping.
+- **Failure (Exit Code 1 or error)**:
+  - The requested profile is invalid or not recognized by the profile manager.
+  - Halt execution immediately.
+  - Run `ProfileChecker` without arguments to list all supported profiles on the system:
+    ```bash
+    mvn exec:java -Dexec.mainClass="com.jobscraper.ProfileChecker"
+    ```
+  - Prompt the user to choose one of the available profiles or configure a matching profile.
+
+### 1.2 Candidate Configuration Source
+Candidate details must be loaded from:
+- `profiles/<profile_name>_profile.md` (e.g., `profiles/candidate_profile.md`)
+- Target candidate's resume PDF (referenced in the profile file)
+
+### 1.3 Required Candidate Data Fields
+When loading or configuring candidate details, ensure the following fields are available. If any critical fields are missing, prompt the user for clarification before applying:
+
+**Identity & Contact:**
+- Browser profile name (Edge user profile name / directory)
+- First name and Last name
+- Email address
+- Phone number (with international country code, e.g., `+91`)
+- Current location: City, State/Province, Country, Postal / PIN code
+
+**Current Professional Status:**
 - Current company
 - Current job title
+- Total years of professional experience
+- Notice period (in days)
+- Current overall compensation (with currency)
+- Expected base salary (with currency)
+
+**Target Preferences:**
+- Preferred employment type (e.g., Full-time, Contract)
+- Preferred locations (e.g., Remote, Bengaluru, Hyderabad, Europe)
+- Willingness to relocate (Yes / No)
+
+**Work Authorization & Visa Status:**
+- Country of citizenship / primary work authorization (e.g., India)
+- International work authorization breakdown:
+  - Legally authorized to work in target foreign region (e.g., EU, UK, US): Yes / No
+  - Requires visa sponsorship now or in the future: Yes / No
+
+**Education & Academic Background:**
+- Highest degree attained (e.g., B.Tech, M.Tech, B.S., M.S.)
+- Institution / University name
+- Major / Field of Study (e.g., Computer Science & Engineering)
+- Graduation year (and start/end dates)
+- Grade Point Average (GPA / CGPA), if applicable
+
+**Online Presence & Portfolio:**
 - LinkedIn profile URL
 - GitHub / Portfolio URL
-- Total years of professional experience
-- Current notice period (in days)
-- Expected base salary
-- Currency unit
-- Current overall salary
-- Preferred employment type (e.g., Full-time)
-- Preferred locations (e.g., Remote, Bengaluru, Hyderabad, Europe)
-- Work authorization (e.g., India)
-- Willingness to relocate (Yes/No)
-- Resume file path
-- Other relevant information (e.g., non-compete clauses, specific constraints)
 
-Do not invent or guess any personal information.
+**Core Technical Stack & Skills:**
+- Primary programming languages
+- Frameworks and libraries
+- Databases and cloud platforms
+- Architectural domains (e.g., Microservices, Distributed Systems, Agentic AI, Cloud Platforms)
 
+**Voluntary Demographic / Self-Identification Defaults (EEO):**
+- Gender, Veteran status, Disability status (standard default: *"Decline to self-identify"* unless candidate explicitly specifies)
 
-## 2. Resume
+**Resume Document:**
+- File path to the candidate's resume PDF (relative or absolute)
 
-Resume file: As provided in `<candidate_name>_profile.md` or provided by user
-
-Read the resume before processing job applications.
-
-Use the resume as the primary source for:
-- Employment history
-- Job titles
-- Technical skills
-- Education
-- Certifications
-- Professional experience
-- Achievements
-- Projects
-
-Do not invent skills, employers, qualifications, projects, or achievements.
-
-Do not alter employment dates or experience to make me appear more qualified.
+Do not invent, fabricate, or assume any personal data.
 
 ---
 
-## 3. Job collection script
+## 2. Resume & Profile Parsing
 
-Job collection application:
+Resume file path is specified in `profiles/<profile_name>_profile.md`.
 
-JobScraperApp in `~/Repos/JobScraper`
+- Read the target candidate's resume PDF and profile file before evaluating or applying to jobs.
+- Use the resume as the primary authoritative source for:
+  - Employment history, employers, and exact titles
+  - Technical skills, tech stacks, and architectures
+  - Education, degrees, and graduation years
+  - Key achievements and project descriptions
+- Do not fabricate or exaggerate qualifications, employment dates, or tech skills.
+- When uploading the resume in browser forms, convert the file path to an **absolute path** (e.g., `<workspace_root>/resume/<candidate_resume>.pdf`). Browser file input dialogs require absolute paths on the local filesystem.
 
-Execute the job collection application using Maven:
+---
+
+## 3. Job Collection Application (JobScraperApp)
+
+After passing the precheck condition in Section 1.1, execute the Java collection application using Maven:
 
 ```bash
 # Optional: compile if changes were made
 mvn clean compile
 
-# Run JobScraperApp with the target profile:
+# Run JobScraperApp for the target profile:
 mvn exec:java -Dexec.mainClass="com.jobscraper.JobScraperApp" -Dexec.args="--profile=<profile_name>"
 ```
-*(You can inspect available profiles with `mvn exec:java -Dexec.mainClass="com.jobscraper.ProfileChecker"`).*
 
-Do not rewrite the application unless execution fails.
-
-If execution fails:
-- Inspect the actual error.
-- Make only necessary changes.
-- Re-run the script/application.
-- Stop if the script/application cannot be executed successfully.
-
-The application collects job listings from:
-- LinkedIn Jobs
-- Instahyre
-
-The generated CSV is saved in the repository directory (`~/Repos/JobScraper`) with this filename format:
-
-`<profile_name>_job_lookup_<ddMMyyyy>.csv`
-
-Use the CSV generated by the current run.
-
-Do not use an older CSV if a new one was successfully generated.
+### Scraping Rules & Output:
+- Scrapes:
+  - LinkedIn Jobs (navigates to *"Jobs based on your preferences"*, past week)
+  - Instahyre Opportunities (navigates to candidate opportunities portal)
+- Output CSV is saved in the repository directory (`<workspace_root>`):
+  `<profile_name>_job_lookup_<ddMMyyyy>.csv`
+- Always use the CSV generated by the current run. Do not use an older lookup CSV if a new one was generated.
+- If execution fails:
+  - Inspect the specific terminal error.
+  - Make only necessary fixes to execution arguments or environment.
+  - Re-run the application.
+  - Stop if the application cannot be executed successfully.
 
 ---
 
-## 4. Match jobs against my resume
+## 4. Job Matching & Strict Eligibility Filtering
 
-For every collected job:
+Before opening any job in the browser, apply the following mandatory filters in order:
 
-1. Open and inspect the job description using the link in csv.
+### 4.1 Mandatory Hard Eligibility Filters (ALL must pass)
+A job MUST satisfy ALL of the following criteria to be eligible for application:
 
-Prioritize jobs with:
-- Strong technical alignment.
-- Relevant experience requirements.
-- Relevant seniority.
-- Strong overlap with my existing skills.
-- Suitable location and work arrangement.
+1. **Not Already Applied**: The job URL does not already appear with status `Submitted` or `Already applied` in `<profile_name>_job_application_tracker.csv`.
+2. **Active Listing**: The job posting is still active and accepting applications.
+3. **Location Eligibility**: The work location strictly matches at least one of the candidate's preferred locations specified in their profile.
+4. **Employment Type**: Matches the candidate's preferred employment type (e.g., Full-time).
+5. **Company Size (Minimum 500 Employees)**: Companies with fewer than 500 employees or small startups are strictly ineligible.
+6. **Experience Compatibility**: Experience requirements in the job posting must be reasonably compatible with the candidate's total years of experience (e.g., within candidate YOE ± 2 years; avoid entry-level roles requiring < 2 YOE and Principal/Director roles requiring > candidate YOE + 3 years).
+7. **Work Authorization & Sponsorship Match**: Position must not require pre-existing citizenship or work permits that the candidate lacks.
 
----
+**Location and company size filtering are HARD eligibility requirements, not ranking preferences.**
 
-## 5. Mandatory Browser Subagent Delegation
+### 4.2 Location Matching Rules
+Apply strict matching against the candidate's preferred locations:
 
-Browser interaction MUST be performed by the dedicated Antigravity Browser Subagent.
+- **Metropolitan Cities (e.g., Bengaluru, Hyderabad)**:
+  - Role must be physically based in the city or recognized metropolitan area.
+  - Hybrid or on-site roles are acceptable only if located within the candidate's preferred city.
+- **Remote Positions**:
+  - Must be fully remote.
+  - Check geographic restrictions: *Remote Worldwide* or *Remote within candidate's resident country* qualify.
+  - Reject positions that are *Remote (US Only)* or *Remote (EU Only)* if the candidate is not resident/authorized there.
+  - Do not treat hybrid or on-site positions in non-preferred cities as remote.
+- **International / Europe Positions**:
+  - If candidate is based internationally, the role must explicitly offer visa sponsorship, relocation assistance, or allow international remote work.
+  - Immediately reject positions that explicitly state *"No visa sponsorship provided"*, *"Must possess valid local work authorization"*, or *"Not eligible for relocation"*.
+- **Ambiguous Locations**:
+  - If a job's location or remote scope cannot be determined with confidence, mark the job as `Requires manual action` rather than applying automatically.
 
-### Mandatory invocation rules
+### 4.3 Company Size Verification Guidelines
+- **Explicit Size in CSV / Posting**: If the company size is stated and is fewer than 500 employees, reject immediately.
+- **Blank / Unparsed Size in CSV**:
+  - On some portals (notably LinkedIn), employee count may not be captured in the initial card scrape.
+  - Do NOT automatically discard well-known global enterprises (e.g., Fortune 500, established public tech companies, major MNCs) purely because the field was blank in the CSV.
+  - When inspecting the job in the browser, check the company profile insight on the posting.
+  - If verified >= 500 employees: Eligible.
+  - If verified < 500 employees: Reject immediately.
+  - If company is unknown and size remains completely unverified: Mark as `Requires manual action` or reject.
 
-- Do not navigate to job application websites using the main agent's browser tools.
-- Do not use web search, HTTP requests, curl, APIs, or scripts to interact with job application websites.
-- Do not simulate browser interactions using JavaScript, Playwright, Selenium, or Python.
-- You MUST delegate website navigation and interaction to the dedicated `browser` subagent.
-- Invoke the `/browser` command explicitly through Antigravity's browser subagent mechanism. Merely mentioning `/browser` in your reasoning or instructions does not count as invocation.
-- Do not proceed with website interaction if the browser subagent is unavailable.
-
-### Delegation workflow
-
-For every shortlisted job:
-
-1. Prepare the following information:
-    - Job title
-    - Company
-    - Job URL
-    - Location
-    - Relevant candidate profile information
-    - Resume file path
-
-2. Explicitly invoke the Browser Subagent with a task containing the job URL and the required application workflow.
-
-3. Instruct the Browser Subagent to:
-    - Open the supplied job URL.
-    - Verify that the listing is active.
-    - Inspect the job description.
-    - Check whether the candidate has already applied.
-    - Navigate to the application form.
-    - Fill out the form using the supplied candidate profile.
-    - Upload the supplied resume when required.
-    - Report any missing information or manual intervention requirements.
-    - Submit only when authorized by the application approval policy.
-    - Verify the submission confirmation.
-
-4. Wait for the Browser Subagent to finish before processing its result.
-
-5. Update the application tracker using the actual result returned by the Browser Subagent.
-
-### Browser delegation failure
-
-If the Browser Subagent cannot be invoked:
-
-- Stop website application processing.
-- Do not silently fall back to another browser tool.
-- Do not use scripts as an alternative.
-- Report that browser delegation failed and explain the reason.
-- Continue only after browser access is restored.
-
-### Browser interaction restrictions
-
-- Do not bypass CAPTCHA, authentication, or anti-bot controls.
-- Ask the user to sign in when authentication is required.
-- Never fabricate application submission confirmations.
-- Never mark an application as submitted without visible confirmation evidence.
+### 4.4 Technical Alignment & Scoring
+Rank eligible passing jobs based on technical relevance:
+- Overlap between the candidate's primary languages/frameworks and the job requirements
+- Seniority alignment (e.g., SDE 2, Senior Software Engineer, SDE 3, Tech Lead)
+- Relevance of candidate's past domain experience (e.g., Fintech, Cloud Infrastructure, Healthcare, Distributed Platforms, AI/ML)
+- Assign a match score percentage (e.g., `85%`, `94%`) reflecting technical compatibility.
 
 ---
 
-## 6. Application approval
+## 5. Browser-Based Application Protocol
 
-At the start of the application process, present the following information:
+### 5.1 Pre-Flight Browser Identity Check & Auto-Launch
+Before navigating to any job links or filling out forms, ensure that Microsoft Edge is actively open with the candidate's designated profile:
 
-- Job title
-- Company
-- Job URL
-- Location
+1. **Check if Profile is Open**:
+   Run `ProfileChecker` to verify whether the target profile is actively running:
+   ```bash
+   mvn exec:java -Dexec.mainClass="com.jobscraper.ProfileChecker" -Dexec.args="--profile=<profile_name>"
+   ```
+   Inspect the `Running:` field in the output (`Running: Yes` or `Running: No`).
 
-Apply automatically if the job has not already been applied.
+2. **Auto-Launch Profile if Not Already Open**:
+   If the profile is **NOT** running (`Running: No`), the browser subagent must immediately launch Microsoft Edge configured with that profile directory:
+   
+   **Option A (Using ProfileChecker launcher):**
+   ```bash
+   mvn exec:java -Dexec.mainClass="com.jobscraper.ProfileChecker" -Dexec.args="--profile=<profile_name> --open"
+   ```
+   
+   **Option B (Direct OS launch command):**
+   - **macOS:**
+     ```bash
+     open -na "Microsoft Edge" --args --profile-directory="<directory>"
+     ```
+   - **Windows:**
+     ```bash
+     cmd.exe /c start msedge --profile-directory="<directory>"
+     ```
+   - **Linux:**
+     ```bash
+     microsoft-edge --profile-directory="<directory>" &
+     ```
+   Wait 2 to 3 seconds for the browser window to initialize and focus.
 
-Submission steps:
-1. Submit the application through the browser.
-2. Verify whether the website confirms successful submission.
-3. Record the application status.
-4. Do not mark it as submitted unless confirmation is visible.
+3. **Session & Identity Pre-flight**:
+   - Verify that the browser session is operating under `<profile_name>`'s logged-in account on LinkedIn or target job boards.
+   - Confirm that the profile avatar or name matches the candidate.
+   - If signed out or logged in under a different account, pause and prompt the user to sign into the active profile window.
+   - Never proceed with form filling under an mismatched session.
+
+### 5.2 Application Form Filling Protocol
+For each shortlisted job:
+1. Navigate to the job's `Apply URL` (or initiate LinkedIn Easy Apply).
+2. For direct ATS portals (Workday, Greenhouse, Ashby, Lever, SmartRecruiters, Taleo):
+   - **Personal Information**: Autofill first name, last name, email, phone number, and location from candidate profile.
+   - **Address**: Populate street address, city, state, and postal code.
+   - **Resume Upload**: Upload the resume PDF using its **absolute path**.
+   - **Experience & Education**: Select or fill current company, current title, total experience, institution name, degree, and graduation year.
+   - **Work Authorization**: Answer truthfully based on candidate profile (authorized in resident country; requires sponsorship for foreign locations).
+   - **Compensation & Notice Period**: Enter expected salary and notice period as specified in the profile.
+   - **EEO / Diversity Disclosures**: Select *"Decline to self-identify"* unless specified otherwise in the candidate profile.
+3. If security checkpoints or blockers appear:
+   - **CAPTCHA / Cloudflare Turnstile / Bot detection**: Do not attempt to bypass.
+   - **MFA / OTP verification**: Do not fabricate.
+   - **Mandatory account creation with complex password requirements**:
+   - For any of the above, mark status as `Requires manual action` with notes in the tracker, notify the user, and continue to the next job.
 
 ---
 
-## 7. Application tracking
+## 6. Approval Modes
 
-Maintain a CSV file named:
+The agent supports two execution modes:
 
-`<profile_name>_job_application_tracker.csv`
+### Mode 1: Review & Confirm Mode (Default / Recommended)
+1. The agent completes the application form up to the final review/submit step.
+2. Present a clear summary to the user:
+   - Job Title & Company
+   - Job URL
+   - Location & Match Score
+   - Summary of filled fields
+   - Direct link or screenshot for review
+3. Request user confirmation before clicking the final submission button.
+4. Record status as `Awaiting approval` until user gives consent.
 
-Save it in the same repository folder (`~/Repos/JobScraper`).
-
-Include these columns:
-
-- Job title
-- Company
-- Job URL
-- Source website
-- Location
-- Date posted
-- Match score
-- Application status
-- Date applied
-- Resume used
-- Notes
-- Confirmation evidence
-
-Possible application statuses:
-
-- Collected
-- Shortlisted
-- Application form opened
-- Awaiting approval
-- Submitted
-- Failed
-- Requires manual action
-- Already applied
-
-Do not mark a job as submitted when the application form was only opened or filled.
-
-Do not apply to the same job more than once.
-
-Use the job URL as the primary identifier for duplicate detection.
+### Mode 2: Autonomous Submission Mode (Only when explicitly instructed)
+1. If the user explicitly instructs the agent to submit applications automatically (e.g., *"apply automatically to all shortlisted jobs"*):
+   - The agent fills out the application.
+   - Validates that all required fields are correctly populated.
+   - Submits the application.
+   - Captures visible confirmation evidence (confirmation page URL, confirmation text, application ID, or screenshot).
+   - Only marks `Submitted` when authentic confirmation evidence is observed.
 
 ---
 
-## 8. Final report
+## 7. Application Tracking & In-Place Deduplication
 
-At the end of each automation run, report:
+Maintain an ongoing application record in `<profile_name>_job_application_tracker.csv` in the repository root.
 
-- Whether the job collection application (JobScraperApp) executed successfully.
-- Total jobs collected.
-- Total jobs shortlisted.
-- Total applications prepared.
-- Total applications submitted after approval.
-- Applications requiring manual action.
-- Applications that failed.
-- Location of the generated CSV.
-- Location of the application tracker.
+### Tracker Columns:
+`Job title,Company,Job URL,Source website,Location,Date posted,Match score,Application status,Date applied,Resume used,Notes,Confirmation evidence`
 
-Clearly distinguish between applications prepared and applications actually submitted.
+### Permitted Application Statuses:
+- `Collected`: Job listing recorded from scraper.
+- `Shortlisted`: Passed all hard eligibility checks and technical scoring.
+- `Application form opened`: Application portal successfully accessed.
+- `Awaiting approval`: Form filled; awaiting user confirmation before final submission.
+- `Submitted`: Application successfully submitted and verified with confirmation evidence.
+- `Failed`: Application could not be submitted due to technical error.
+- `Requires manual action`: Requires user intervention (e.g., CAPTCHA, MFA, custom test/screening).
+- `Already applied`: Previously submitted or detected as already applied on the platform.
 
-Do not fabricate results.
+### Tracking Rules:
+- **In-Place Updates**: If a job URL is already present in the tracker CSV, update that existing row in-place. Do not append duplicate rows for the same job.
+- **URL Deduplication**: Normalize job URLs by stripping tracking query parameters (e.g., `refId`, `trackingId`, `utm_*`).
+- **Date Format**: Use standard format `dd-MM-yyyy`.
+- **Confirmation Evidence**: Must record specific confirmation details (e.g., confirmation URL, application reference number, confirmation message string). Never mark a job as `Submitted` without visible confirmation evidence.
 
-Begin by inspecting the application and resume, then execute the job collection application.
+---
+
+## 8. Final Run Report
+
+At the conclusion of each automation run, deliver a comprehensive structured report:
+
+- **Target Candidate**: `<profile_name>`
+- **Job Collection Summary**:
+  - `JobScraperApp` execution status (Success / Failed)
+  - Total jobs collected from LinkedIn and Instahyre
+  - Location of generated lookup CSV
+- **Filtering & Matching Summary**:
+  - Total jobs shortlisted
+  - Total jobs rejected (with breakdown by reason: location, company size < 500, experience mismatch)
+- **Application Processing Summary**:
+  - Applications prepared / awaiting approval
+  - Applications successfully submitted (with confirmation evidence details)
+  - Applications requiring manual action (with job links and specific blockers)
+  - Applications that failed (with error descriptions)
+- **Tracker Status**:
+  - Path to `<profile_name>_job_application_tracker.csv`
+  - Total tracked entries
