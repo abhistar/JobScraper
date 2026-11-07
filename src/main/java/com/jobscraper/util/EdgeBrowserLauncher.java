@@ -97,6 +97,8 @@ public class EdgeBrowserLauncher {
             if ("Anushree".equalsIgnoreCase(profile.name())) {
                 File prof1 = new File(userDataDir, "Profile 1");
                 if (prof1.exists()) return "Profile 1";
+                File anushreeDir = new File(userDataDir, "Anushree");
+                if (anushreeDir.exists()) return "Anushree";
             } else if ("Abhinav".equalsIgnoreCase(profile.name())) {
                 return "Default";
             }
@@ -112,6 +114,9 @@ public class EdgeBrowserLauncher {
             String debugUserDataDir = resolveDebugUserDataDir(profile);
             String profileDir = resolveProfileDirectory(profile, debugUserDataDir);
 
+            // Clean up any stale locks or orphaned processes on port 9222
+            cleanupStalePortAndLocks(debugUserDataDir);
+
             System.out.println("[*] Edge is not running in debug mode. Launching Edge with profile: " + profile.name() + " (" + profileDir + ")...");
             String edgeExe = findEdgeExecutable();
             List<String> cmd = new ArrayList<>();
@@ -124,21 +129,22 @@ public class EdgeBrowserLauncher {
             cmd.add("--user-data-dir=" + debugUserDataDir);
 
             ProcessBuilder pb = new ProcessBuilder(cmd);
-            pb.redirectErrorStream(true);
+            pb.redirectOutput(ProcessBuilder.Redirect.DISCARD);
+            pb.redirectError(ProcessBuilder.Redirect.DISCARD);
             launchedProcess = pb.start();
 
-            // Wait for CDP to become active (up to 15 seconds)
-            long deadline = System.currentTimeMillis() + 15000;
+            // Wait for CDP to become active (up to 30 seconds)
+            long deadline = System.currentTimeMillis() + 30000;
             boolean ready = false;
             while (System.currentTimeMillis() < deadline) {
                 if (isCdpAvailable()) {
                     ready = true;
                     break;
                 }
-                Thread.sleep(500);
+                Thread.sleep(600);
             }
             if (!ready) {
-                throw new IllegalStateException("Failed to launch Edge with remote debugging port " + DEBUG_PORT);
+                throw new IllegalStateException("Failed to launch Edge with remote debugging port " + DEBUG_PORT + " within timeout.");
             }
             System.out.println("[✓] Edge launched successfully in debug mode on port " + DEBUG_PORT);
         } else {
@@ -148,6 +154,38 @@ public class EdgeBrowserLauncher {
         playwright = Playwright.create();
         browser = playwright.chromium().connectOverCDP(CDP_URL);
         return browser;
+    }
+
+    /**
+     * Cleans up stale lock files in userDataDir and ensures port 9222 is free before launching.
+     */
+    private static void cleanupStalePortAndLocks(String userDataDir) {
+        try {
+            List<Long> pids = getPidsOnPort(DEBUG_PORT);
+            for (Long pid : pids) {
+                ProcessHandle.of(pid).ifPresent(ph -> {
+                    ph.destroy();
+                    try {
+                        Thread.sleep(300);
+                    } catch (InterruptedException ignored) {}
+                    if (ph.isAlive()) ph.destroyForcibly();
+                });
+            }
+
+            if (userDataDir != null && !userDataDir.isBlank()) {
+                File dir = new File(userDataDir);
+                if (dir.exists()) {
+                    File lockFile = new File(dir, "SingletonLock");
+                    if (lockFile.exists() && pids.isEmpty()) {
+                        lockFile.delete();
+                    }
+                    File socketFile = new File(dir, "SingletonSocket");
+                    if (socketFile.exists() && pids.isEmpty()) {
+                        socketFile.delete();
+                    }
+                }
+            }
+        } catch (Exception ignored) {}
     }
 
     public Playwright getPlaywright() {
