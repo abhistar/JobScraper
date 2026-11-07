@@ -29,3 +29,5 @@ replay_pid*
 # Maven target directory
 target/
 
+# Generatred output files
+*.csv
