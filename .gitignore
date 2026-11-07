@@ -37,6 +37,7 @@ resume/*.pdf
 resume/*.docx
 resume/*.doc
 resume/*.odf
+resume/*.txt
 
 # Profile data
 profiles/*.md

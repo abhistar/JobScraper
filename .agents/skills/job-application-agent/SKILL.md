@@ -14,6 +14,7 @@ Your objective is to:
 6. Ensure the browser is open with the candidate's designated profile (automatically launching it if not already open).
 7. Fill out job applications accurately using candidate profile details and resume.
 8. Maintain an accurate in-place record in the candidate's application tracker CSV.
+9. Cleanly close each application browser tab once completed to prevent dangling memory usage and resource leaks.
 
 IMPORTANT: Do not use standalone Python, Selenium, Playwright, or arbitrary JavaScript scripts to interact with job application websites or submit applications. Use the browser agent / browser tools to navigate websites and interact with application forms.
 
@@ -261,7 +262,18 @@ For each shortlisted job:
    - **CAPTCHA / Cloudflare Turnstile / Bot detection**: Do not attempt to bypass.
    - **MFA / OTP verification**: Do not fabricate.
    - **Mandatory account creation with complex password requirements**:
-   - For any of the above, mark status as `Requires manual action` with notes in the tracker, notify the user, and continue to the next job.
+   - For any of the above, mark status as `Requires manual action` with notes in the tracker, notify the user, close the tab (`close_page`), and continue to the next job.
+
+### 5.3 Browser Tab Lifecycle & Memory Management
+To avoid memory bloat, high CPU usage, and dangling background WebContents / CDP targets during automated runs:
+1. **Close Tab Upon Successful Submission**:
+   - Immediately after capturing visible confirmation evidence (screenshot, confirmation text, reference ID) and updating the tracker, the browser subagent MUST explicitly close the application tab using `close_page` (passing the associated `pageId`).
+2. **Close Tab Upon Terminal Statuses / Blockers**:
+   - If an application encounters a terminal condition (`Already applied`, `Failed`, or after capturing necessary details for `Requires manual action`), close the tab immediately before proceeding to the next job.
+3. **Preserve Tab ONLY for Review Mode**:
+   - If operating in **Review & Confirm Mode** (`Awaiting approval`), keep the tab open for user review. Once the user approves and final submission confirmation is captured, close the tab immediately.
+4. **Clean Session Teardown**:
+   - Ensure no orphan or dangling tabs/targets remain open in the background once all candidate jobs in the queue have finished processing.
 
 ---
 
@@ -279,6 +291,7 @@ The agent supports two execution modes:
    - Direct link or screenshot for review
 3. Request user confirmation before clicking the final submission button.
 4. Record status as `Awaiting approval` until user gives consent.
+5. Upon receiving user consent, submit the application, capture confirmation evidence, and immediately close the browser tab (`close_page`).
 
 ### Mode 2: Autonomous Submission Mode (Only when explicitly instructed)
 1. If the user explicitly instructs the agent to submit applications automatically (e.g., *"apply automatically to all shortlisted jobs"*):
@@ -287,6 +300,7 @@ The agent supports two execution modes:
    - Submits the application.
    - Captures visible confirmation evidence (confirmation page URL, confirmation text, application ID, or screenshot).
    - Only marks `Submitted` when authentic confirmation evidence is observed.
+   - Immediately closes the application tab (`close_page`) to free up memory and prevent dangling background sessions.
 
 ---
 
