@@ -97,7 +97,8 @@ public class ProfileChecker {
                     String cl = cmd.get();
                     if (cl.toLowerCase().contains("edge") || cl.toLowerCase().contains("msedge")) {
                         return cl.contains("--profile-directory=" + targetDir) ||
-                               cl.contains("--profile-directory=\"" + targetDir + "\"");
+                               cl.contains("--profile-directory=\"" + targetDir + "\"") ||
+                               ("Default".equalsIgnoreCase(targetDir) && !cl.contains("--profile-directory") && cl.contains("/MacOS/Microsoft Edge"));
                     }
                 }
                 return false;
@@ -109,8 +110,10 @@ public class ProfileChecker {
         String os = System.getProperty("os.name", "").toLowerCase();
         try {
             Process process;
-            if (os.contains("mac") || os.contains("linux")) {
-                process = new ProcessBuilder("pgrep", "-af", "Microsoft Edge").start();
+            if (os.contains("mac")) {
+                process = new ProcessBuilder("ps", "-Ao", "args").start();
+            } else if (os.contains("linux")) {
+                process = new ProcessBuilder("pgrep", "-af", "edge").start();
             } else if (os.contains("win")) {
                 process = new ProcessBuilder("cmd.exe", "/c", "wmic process where \"name like '%msedge%'\" get commandline").start();
             } else {
@@ -120,9 +123,14 @@ public class ProfileChecker {
             try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
                 String line;
                 while ((line = reader.readLine()) != null) {
-                    if (line.contains("--profile-directory=" + targetDir) ||
-                        line.contains("--profile-directory=\"" + targetDir + "\"")) {
-                        return true;
+                    if (line.toLowerCase().contains("edge") || line.toLowerCase().contains("msedge")) {
+                        if (line.contains("--profile-directory=" + targetDir) ||
+                            line.contains("--profile-directory=\"" + targetDir + "\"")) {
+                            return true;
+                        }
+                        if ("Default".equalsIgnoreCase(targetDir) && !line.contains("--profile-directory") && line.contains("/MacOS/Microsoft Edge")) {
+                            return true;
+                        }
                     }
                 }
             }

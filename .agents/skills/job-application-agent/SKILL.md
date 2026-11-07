@@ -11,14 +11,14 @@ Your objective is to:
 3. Load the candidate's personal information from their profile configuration and resume.
 4. Execute the `JobScraperApp` job collection application in this repository for the candidate.
 5. Read and filter collected job listings against candidate eligibility criteria and resume.
-6. Ensure the browser is open with the candidate's designated profile (automatically launching it if not already open).
+6. Delegate application form navigation and submission to the browser agent using candidate profile details and resume.
 7. Fill out job applications accurately using candidate profile details and resume.
 8. Maintain an accurate in-place record in the candidate's application tracker CSV.
 9. Cleanly close each application browser tab once completed to prevent dangling memory usage and resource leaks.
 
 IMPORTANT: Do not use standalone Python, Selenium, Playwright, or arbitrary JavaScript scripts to interact with job application websites or submit applications. Use the browser agent / browser tools to navigate websites and interact with application forms.
 
-Scripts and shell commands are permitted ONLY for executing the job collection application (`JobScraperApp`), verifying Edge browser profiles (`ProfileChecker`), launching the browser with the target profile if not open, and reading, validating, or organizing CSV outputs.
+Scripts and shell commands are permitted ONLY for executing the job collection application (`JobScraperApp`), verifying Edge browser profiles (`ProfileChecker`), and reading, validating, or organizing CSV outputs.
 
 ---
 
@@ -39,8 +39,7 @@ mvn exec:java -Dexec.mainClass="com.jobscraper.ProfileChecker" -Dexec.args="--pr
 - **Success (Exit Code 0)**:
   - Parses and outputs:
     `Profile Name: <name>, Directory: <directory>, Email: <email>, Running: <Yes|No>`
-  - Note the profile `Directory` and whether it is actively running.
-  - Proceed with loading candidate details and scraping.
+  - Note the profile `Directory`. Proceed with loading candidate details and scraping.
 - **Failure (Exit Code 1 or error)**:
   - The requested profile is invalid or not recognized by the profile manager.
   - Halt execution immediately.
@@ -208,44 +207,18 @@ Rank eligible passing jobs based on technical relevance:
 
 ## 5. Browser-Based Application Protocol
 
-### 5.1 Pre-Flight Browser Identity Check & Auto-Launch
-Before navigating to any job links or filling out forms, ensure that Microsoft Edge is actively open with the candidate's designated profile:
+### 5.1 Browser Delegation & Isolation Protocol
+Browser interaction MUST be performed via the dedicated Antigravity Browser Subagent (`/browser`) using its native browser automation tools:
 
-1. **Check if Profile is Open**:
-   Run `ProfileChecker` to verify whether the target profile is actively running:
-   ```bash
-   mvn exec:java -Dexec.mainClass="com.jobscraper.ProfileChecker" -Dexec.args="--profile=<profile_name>"
-   ```
-   Inspect the `Running:` field in the output (`Running: Yes` or `Running: No`).
+1. **Dedicated Browser Session**:
+   - The Browser Subagent automates website navigation and form filling directly through Antigravity's browser tools.
+   - Do NOT manually launch desktop Edge windows using `open -na "Microsoft Edge"` or `ProfileChecker --open`. Manual desktop browser launches open consumer sessions lacking remote debugging origin flags (`--remote-allow-origins=*`), which triggers repetitive "Allow remote debugging?" security prompts on your personal desktop browser.
+   - Browser automation operates in an isolated environment, leaving your active desktop browsing session completely undisturbed.
 
-2. **Auto-Launch Profile if Not Already Open**:
-   If the profile is **NOT** running (`Running: No`), the browser subagent must immediately launch Microsoft Edge configured with that profile directory:
-   
-   **Option A (Using ProfileChecker launcher):**
-   ```bash
-   mvn exec:java -Dexec.mainClass="com.jobscraper.ProfileChecker" -Dexec.args="--profile=<profile_name> --open"
-   ```
-   
-   **Option B (Direct OS launch command):**
-   - **macOS:**
-     ```bash
-     open -na "Microsoft Edge" --args --profile-directory="<directory>"
-     ```
-   - **Windows:**
-     ```bash
-     cmd.exe /c start msedge --profile-directory="<directory>"
-     ```
-   - **Linux:**
-     ```bash
-     microsoft-edge --profile-directory="<directory>" &
-     ```
-   Wait 2 to 3 seconds for the browser window to initialize and focus.
-
-3. **Session & Identity Pre-flight**:
-   - Verify that the browser session is operating under `<profile_name>`'s logged-in account on LinkedIn or target job boards.
-   - Confirm that the profile avatar or name matches the candidate.
-   - If signed out or logged in under a different account, pause and prompt the user to sign into the active profile window.
-   - Never proceed with form filling under an mismatched session.
+2. **Session & Identity Protocol**:
+   - The Browser Subagent verifies candidate identity using details loaded from the candidate profile (`profiles/<profile_name>_profile.md`) and resume.
+   - When submitting applications on external ATS portals (Workday, Greenhouse, Ashby, Lever, etc.), the subagent populates candidate credentials and contact information accurately.
+   - If a third-party portal requires authentication or manual verification (CAPTCHA, MFA, OTP), mark status as `Requires manual action` with notes in the tracker, notify the user, close the tab (`close_page`), and proceed to the next job.
 
 ### 5.2 Application Form Filling Protocol
 For each shortlisted job:
