@@ -3,6 +3,7 @@ package com.jobscraper;
 import com.jobscraper.model.EdgeProfile;
 import com.jobscraper.model.JobPost;
 import com.jobscraper.scraper.InstahyreScraper;
+import com.jobscraper.scraper.LinkedInProfileMatchScraper;
 import com.jobscraper.scraper.LinkedInScraper;
 import com.jobscraper.util.CompanySizeFilter;
 import com.jobscraper.util.CsvWriter;
@@ -14,12 +15,14 @@ import com.microsoft.playwright.Page;
 
 import java.io.File;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 /**
  * Script 2: Main Job Scraper Application
  *
- * Automates job scraping on LinkedIn and Instahyre using Microsoft Edge in debug mode.
+ * Automates job scraping on LinkedIn (preferences and profile match) and Instahyre using Microsoft Edge in debug mode.
  * Generates an output CSV named <target_profile_name>_job_lookup_<ddmmyyyy>.csv
  * and cleanly shuts down the Edge debug session upon completion.
  */
@@ -27,6 +30,9 @@ public class JobScraperApp {
 
     public static void main(String[] args) {
         String targetProfileName = "Abhinav"; // default profile
+        boolean scrapePreferences = true;
+        boolean scrapeProfileMatch = true;
+        boolean scrapeInstahyre = true;
 
         // Parse CLI arguments: e.g. --profile=Abhinav or --profile=Anushree
         for (int i = 0; i < args.length; i++) {
@@ -37,6 +43,20 @@ public class JobScraperApp {
                 if (i + 1 < args.length) {
                     targetProfileName = args[++i].trim();
                 }
+            } else if (arg.equals("--profile-match-only") || arg.equals("--section=profile-match") || arg.equals("--scraper=profile-match")) {
+                scrapePreferences = false;
+                scrapeProfileMatch = true;
+                scrapeInstahyre = false;
+            } else if (arg.equals("--preferences-only") || arg.equals("--section=preferences") || arg.equals("--scraper=preferences")) {
+                scrapePreferences = true;
+                scrapeProfileMatch = false;
+                scrapeInstahyre = false;
+            } else if (arg.equals("--skip-preferences")) {
+                scrapePreferences = false;
+            } else if (arg.equals("--skip-profile-match")) {
+                scrapeProfileMatch = false;
+            } else if (arg.equals("--skip-instahyre")) {
+                scrapeInstahyre = false;
             } else if (!arg.startsWith("-")) {
                 targetProfileName = arg.trim();
             }
@@ -61,6 +81,7 @@ public class JobScraperApp {
         EdgeBrowserLauncher launcher = new EdgeBrowserLauncher();
         List<JobPost> allJobs = new ArrayList<>();
         List<JobPost> linkedInJobs = new ArrayList<>();
+        List<JobPost> linkedInProfileMatchJobs = new ArrayList<>();
         List<JobPost> instahyreJobs = new ArrayList<>();
 
         try {
@@ -69,36 +90,62 @@ public class JobScraperApp {
             BrowserContext context = !browser.contexts().isEmpty() ? browser.contexts().get(0) : browser.newContext();
             Page page = context.newPage();
 
-            // Step 3 & 4: Scrape LinkedIn
-            try {
-                linkedInJobs = LinkedInScraper.scrape(page, normalizedProfile);
-                allJobs.addAll(linkedInJobs);
-            } catch (Exception e) {
-                System.err.println("[!] Error during LinkedIn scraping: " + e.getMessage());
+            // Step 3 & 4: Scrape LinkedIn (Jobs based on your preferences)
+            if (scrapePreferences) {
+                try {
+                    linkedInJobs = LinkedInScraper.scrape(page, normalizedProfile);
+                    allJobs.addAll(linkedInJobs);
+                } catch (Exception e) {
+                    System.err.println("[!] Error during LinkedIn Preferences scraping: " + e.getMessage());
+                }
+            }
+
+            // Step 3 & 4: Scrape LinkedIn (Jobs that match your profile)
+            if (scrapeProfileMatch) {
+                try {
+                    if (!browser.isConnected()) {
+                        browser = launcher.connectOrLaunch(profile);
+                        context = !browser.contexts().isEmpty() ? browser.contexts().get(0) : browser.newContext();
+                        page = context.newPage();
+                    } else if (page.isClosed()) {
+                        page = context.newPage();
+                    }
+                    linkedInProfileMatchJobs = LinkedInProfileMatchScraper.scrape(page, normalizedProfile);
+                    allJobs.addAll(linkedInProfileMatchJobs);
+                } catch (Exception e) {
+                    System.err.println("[!] Error during LinkedIn Profile Match scraping: " + e.getMessage());
+                }
             }
 
             // Step 3 & 4: Scrape Instahyre
-            try {
-                if (!browser.isConnected()) {
-                    browser = launcher.connectOrLaunch(profile);
-                    context = !browser.contexts().isEmpty() ? browser.contexts().get(0) : browser.newContext();
-                    page = context.newPage();
-                } else if (page.isClosed()) {
-                    page = context.newPage();
-                }
-                instahyreJobs = InstahyreScraper.scrape(page, normalizedProfile);
-                allJobs.addAll(instahyreJobs);
-            } catch (Exception e) {
-                System.err.println("[!] Error during Instahyre scraping: " + e.getMessage());
-            } finally {
+            if (scrapeInstahyre) {
                 try {
-                    page.close();
-                } catch (Exception ignored) {}
+                    if (!browser.isConnected()) {
+                        browser = launcher.connectOrLaunch(profile);
+                        context = !browser.contexts().isEmpty() ? browser.contexts().get(0) : browser.newContext();
+                        page = context.newPage();
+                    } else if (page.isClosed()) {
+                        page = context.newPage();
+                    }
+                    instahyreJobs = InstahyreScraper.scrape(page, normalizedProfile);
+                    allJobs.addAll(instahyreJobs);
+                } catch (Exception e) {
+                    System.err.println("[!] Error during Instahyre scraping: " + e.getMessage());
+                } finally {
+                    try {
+                        page.close();
+                    } catch (Exception ignored) {}
+                }
             }
 
-            // Step 5: Save all collected jobs to CSV (guaranteeing >= 500 employees)
+            // Step 5: Save all collected jobs to CSV (guaranteeing >= 500 employees and deduplicating by URL)
+            Set<String> seenJobUrls = new HashSet<>();
             List<JobPost> verifiedJobs = new ArrayList<>();
             for (JobPost job : allJobs) {
+                String u = job.jobUrl() != null ? job.jobUrl().trim() : "";
+                if (!u.isBlank() && !seenJobUrls.add(u)) {
+                    continue;
+                }
                 if (CompanySizeFilter.meetsMinimumCompanySize(job.companySize())) {
                     verifiedJobs.add(job);
                 } else {
@@ -112,11 +159,12 @@ public class JobScraperApp {
             System.out.println("\n" + "=".repeat(65));
             System.out.println("[✓] SCRAPING SUMMARY");
             System.out.println("=".repeat(65));
-            System.out.println("Profile:       " + normalizedProfile);
-            System.out.println("Total Jobs:    " + verifiedJobs.size());
-            System.out.println("  - LinkedIn:  " + verifiedJobs.stream().filter(j -> "LinkedIn".equalsIgnoreCase(j.source())).count());
-            System.out.println("  - Instahyre: " + verifiedJobs.stream().filter(j -> "Instahyre".equalsIgnoreCase(j.source())).count());
-            System.out.println("Output File:   " + csvFile.getAbsolutePath());
+            System.out.println("Profile:                         " + normalizedProfile);
+            System.out.println("Total Jobs:                      " + verifiedJobs.size());
+            System.out.println("  - LinkedIn (Preferences):      " + linkedInJobs.size());
+            System.out.println("  - LinkedIn (Profile Match):    " + linkedInProfileMatchJobs.size());
+            System.out.println("  - Instahyre:                   " + instahyreJobs.size());
+            System.out.println("Output File:                     " + csvFile.getAbsolutePath());
             System.out.println("=".repeat(65) + "\n");
 
         } catch (Exception e) {
