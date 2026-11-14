@@ -300,6 +300,10 @@ public class EdgeBrowserLauncher {
         return debugPort;
     }
 
+    public String getCdpUrl() {
+        return "http://127.0.0.1:" + debugPort;
+    }
+
     public Playwright getPlaywright() {
         return playwright;
     }

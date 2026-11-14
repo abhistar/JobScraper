@@ -13,12 +13,17 @@ import com.jobscraper.util.EdgeProfileManager;
 import com.microsoft.playwright.Browser;
 import com.microsoft.playwright.BrowserContext;
 import com.microsoft.playwright.Page;
+import com.microsoft.playwright.Playwright;
 
 import java.io.File;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 
 /**
  * Script 2: Main Job Scraper Application
@@ -102,55 +107,112 @@ public class JobScraperApp {
         try {
             // Launch or connect to Edge debug session
             Browser browser = launcher.connectOrLaunch(profile);
-            BrowserContext context = !browser.contexts().isEmpty() ? browser.contexts().get(0) : browser.newContext();
-            Page page = context.newPage();
+            String cdpUrl = launcher.getCdpUrl();
 
-            // Step 3 & 4: Scrape LinkedIn (Jobs based on your preferences)
-            if (scrapePreferences) {
-                try {
-                    linkedInJobs = LinkedInScraper.scrape(page, normalizedProfile);
-                    allJobs.addAll(linkedInJobs);
-                } catch (Exception e) {
-                    System.err.println("[!] Error during LinkedIn Preferences scraping: " + e.getMessage());
+            // Run scrapers simultaneously in separate tabs within the browser context
+            int threadCount = (scrapePreferences ? 1 : 0) + (scrapeProfileMatch ? 1 : 0) + (scrapeInstahyre ? 1 : 0);
+            if (threadCount > 0) {
+                System.out.println("[*] Launching " + threadCount + " scraper(s) simultaneously in separate browser tabs...");
+                ExecutorService executor = Executors.newFixedThreadPool(threadCount);
+                Future<List<JobPost>> futurePref = null;
+                Future<List<JobPost>> futureMatch = null;
+                Future<List<JobPost>> futureInsta = null;
+
+                // Tab 1: LinkedIn (Jobs based on your preferences)
+                if (scrapePreferences) {
+                    futurePref = executor.submit(() -> {
+                        System.out.println("[*] [Tab: LinkedIn Preferences] Opening separate tab...");
+                        try (Playwright pw = Playwright.create()) {
+                            Browser b = pw.chromium().connectOverCDP(cdpUrl);
+                            BrowserContext ctx = !b.contexts().isEmpty() ? b.contexts().get(0) : b.newContext();
+                            Page page = ctx.newPage();
+                            try {
+                                return LinkedInScraper.scrape(page, normalizedProfile);
+                            } finally {
+                                try {
+                                    page.close();
+                                } catch (Exception ignored) {}
+                            }
+                        } catch (Exception e) {
+                            System.err.println("[!] Error during LinkedIn Preferences scraping: " + e.getMessage());
+                            return Collections.emptyList();
+                        }
+                    });
                 }
-            }
 
-            // Step 3 & 4: Scrape LinkedIn (Jobs that match your profile)
-            if (scrapeProfileMatch) {
-                try {
-                    if (!browser.isConnected()) {
-                        browser = launcher.connectOrLaunch(profile);
-                        context = !browser.contexts().isEmpty() ? browser.contexts().get(0) : browser.newContext();
-                        page = context.newPage();
-                    } else if (page.isClosed()) {
-                        page = context.newPage();
-                    }
-                    linkedInProfileMatchJobs = LinkedInProfileMatchScraper.scrape(page, normalizedProfile);
-                    allJobs.addAll(linkedInProfileMatchJobs);
-                } catch (Exception e) {
-                    System.err.println("[!] Error during LinkedIn Profile Match scraping: " + e.getMessage());
+                // Tab 2: LinkedIn (Jobs that match your profile)
+                if (scrapeProfileMatch) {
+                    futureMatch = executor.submit(() -> {
+                        System.out.println("[*] [Tab: LinkedIn Profile Match] Opening separate tab...");
+                        try (Playwright pw = Playwright.create()) {
+                            Browser b = pw.chromium().connectOverCDP(cdpUrl);
+                            BrowserContext ctx = !b.contexts().isEmpty() ? b.contexts().get(0) : b.newContext();
+                            Page page = ctx.newPage();
+                            try {
+                                return LinkedInProfileMatchScraper.scrape(page, normalizedProfile);
+                            } finally {
+                                try {
+                                    page.close();
+                                } catch (Exception ignored) {}
+                            }
+                        } catch (Exception e) {
+                            System.err.println("[!] Error during LinkedIn Profile Match scraping: " + e.getMessage());
+                            return Collections.emptyList();
+                        }
+                    });
                 }
-            }
 
-            // Step 3 & 4: Scrape Instahyre
-            if (scrapeInstahyre) {
-                try {
-                    if (!browser.isConnected()) {
-                        browser = launcher.connectOrLaunch(profile);
-                        context = !browser.contexts().isEmpty() ? browser.contexts().get(0) : browser.newContext();
-                        page = context.newPage();
-                    } else if (page.isClosed()) {
-                        page = context.newPage();
-                    }
-                    instahyreJobs = InstahyreScraper.scrape(page, normalizedProfile);
-                    allJobs.addAll(instahyreJobs);
-                } catch (Exception e) {
-                    System.err.println("[!] Error during Instahyre scraping: " + e.getMessage());
-                } finally {
+                // Tab 3: Instahyre
+                if (scrapeInstahyre) {
+                    futureInsta = executor.submit(() -> {
+                        System.out.println("[*] [Tab: Instahyre] Opening separate tab...");
+                        try (Playwright pw = Playwright.create()) {
+                            Browser b = pw.chromium().connectOverCDP(cdpUrl);
+                            BrowserContext ctx = !b.contexts().isEmpty() ? b.contexts().get(0) : b.newContext();
+                            Page page = ctx.newPage();
+                            try {
+                                return InstahyreScraper.scrape(page, normalizedProfile);
+                            } finally {
+                                try {
+                                    page.close();
+                                } catch (Exception ignored) {}
+                            }
+                        } catch (Exception e) {
+                            System.err.println("[!] Error during Instahyre scraping: " + e.getMessage());
+                            return Collections.emptyList();
+                        }
+                    });
+                }
+
+                // Collect results from concurrent scrapers
+                if (futurePref != null) {
                     try {
-                        page.close();
-                    } catch (Exception ignored) {}
+                        linkedInJobs = futurePref.get();
+                        allJobs.addAll(linkedInJobs);
+                    } catch (Exception e) {
+                        System.err.println("[!] Error retrieving LinkedIn Preferences results: " + e.getMessage());
+                    }
                 }
+
+                if (futureMatch != null) {
+                    try {
+                        linkedInProfileMatchJobs = futureMatch.get();
+                        allJobs.addAll(linkedInProfileMatchJobs);
+                    } catch (Exception e) {
+                        System.err.println("[!] Error retrieving LinkedIn Profile Match results: " + e.getMessage());
+                    }
+                }
+
+                if (futureInsta != null) {
+                    try {
+                        instahyreJobs = futureInsta.get();
+                        allJobs.addAll(instahyreJobs);
+                    } catch (Exception e) {
+                        System.err.println("[!] Error retrieving Instahyre results: " + e.getMessage());
+                    }
+                }
+
+                executor.shutdown();
             }
 
             // Step 5: Save all collected jobs to CSV (guaranteeing >= 500 employees or whitelisted, and deduplicating by URL)

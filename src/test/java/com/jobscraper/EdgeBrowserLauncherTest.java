@@ -43,4 +43,12 @@ class EdgeBrowserLauncherTest {
         String defaultDir = EdgeBrowserLauncher.resolveProfileDirectory(defaultProf, "/tmp/Microsoft Edge Debug");
         assertEquals("Default", defaultDir);
     }
+
+    @Test
+    void testGetCdpUrl() {
+        EdgeBrowserLauncher launcher = new EdgeBrowserLauncher();
+        String cdpUrl = launcher.getCdpUrl();
+        assertTrue(cdpUrl.startsWith("http://127.0.0.1:"));
+        assertEquals("http://127.0.0.1:" + launcher.getDebugPort(), cdpUrl);
+    }
 }

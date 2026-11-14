@@ -16,6 +16,9 @@ Java Playwright job scraping automation for Microsoft Edge browser.
   - Navigates to `https://www.instahyre.com/candidate/opportunities/`
   - Collects all opportunity jobs on the page via Angular model and DOM inspection.
   - Filters out small companies.
+- **Simultaneous Multi-Tab Execution**:
+  - All three scrapers (LinkedIn Preferences, LinkedIn Profile Match, and Instahyre) execute concurrently in separate tabs of the same browser context to significantly reduce total scraping time.
+  - Each tab runs its own dedicated Playwright client session while sharing authentication state, cookies, and localStorage.
 - **Company Whitelist**:
   - Automatically records rejected companies (< 500 employees) into `<targetProfileName>_company_whitelist.csv` with columns: `company name`, `company link on linkedin`, `isWhitelisted`.
   - Rejections are collected in memory during scraping and written to CSV in a single batch operation at the end.
