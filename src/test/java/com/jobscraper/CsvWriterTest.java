@@ -20,8 +20,8 @@ public class CsvWriterTest {
     @Test
     public void testOutputFileNameFormat() {
         String expectedDate = LocalDate.now().format(DateTimeFormatter.ofPattern("ddMMyyyy"));
-        assertEquals("Abhinav_job_lookup_" + expectedDate + ".csv", CsvWriter.getOutputFileName("Abhinav"));
-        assertEquals("Anushree_job_lookup_" + expectedDate + ".csv", CsvWriter.getOutputFileName("Anushree"));
+        assertEquals("Candidate1_job_lookup_" + expectedDate + ".csv", CsvWriter.getOutputFileName("Candidate1"));
+        assertEquals("Candidate2_job_lookup_" + expectedDate + ".csv", CsvWriter.getOutputFileName("Candidate2"));
     }
 
     @Test
@@ -49,7 +49,7 @@ public class CsvWriterTest {
                 "https://www.instahyre.com/job-999/"
         );
 
-        File outputFile = CsvWriter.writeJobsToCsv(List.of(job1, job2), "Abhinav", tempDir.toFile());
+        File outputFile = CsvWriter.writeJobsToCsv(List.of(job1, job2), "Candidate1", tempDir.toFile());
         assertTrue(outputFile.exists());
 
         List<String> lines = Files.readAllLines(outputFile.toPath());

@@ -35,13 +35,12 @@ class EdgeBrowserLauncherTest {
 
     @Test
     void testResolveProfileDirectory() {
-        EdgeProfile anushree = new EdgeProfile("Anushree", "Profile 1", "anushree@test.com", "/tmp");
-        String dir = EdgeBrowserLauncher.resolveProfileDirectory(anushree, "/tmp/Microsoft Edge Debug");
-        // Anushree in Microsoft Edge Debug should map to Profile 1 or Anushree
-        assertTrue(dir.equals("Profile 1") || dir.equals("Anushree"));
+        EdgeProfile testProf = new EdgeProfile("TestProfile", "Profile 1", "test@example.com", "/tmp");
+        String dir = EdgeBrowserLauncher.resolveProfileDirectory(testProf, "/tmp/Microsoft Edge Debug");
+        assertNotNull(dir);
 
-        EdgeProfile abhinav = new EdgeProfile("Abhinav", "Default", "abhinav@test.com", "/tmp");
-        String abhinavDir = EdgeBrowserLauncher.resolveProfileDirectory(abhinav, "/tmp/Microsoft Edge Debug");
-        assertEquals("Default", abhinavDir);
+        EdgeProfile defaultProf = new EdgeProfile("DefaultProfile", "Default", "default@example.com", "/tmp");
+        String defaultDir = EdgeBrowserLauncher.resolveProfileDirectory(defaultProf, "/tmp/Microsoft Edge Debug");
+        assertEquals("Default", defaultDir);
     }
 }

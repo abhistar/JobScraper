@@ -1,11 +1,15 @@
 package com.jobscraper.util;
 
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import com.jobscraper.model.EdgeProfile;
 import com.microsoft.playwright.Browser;
 import com.microsoft.playwright.Playwright;
 
 import java.io.BufferedReader;
 import java.io.File;
+import java.io.FileReader;
 import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.ServerSocket;
@@ -16,6 +20,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 /**
@@ -163,13 +168,36 @@ public class EdgeBrowserLauncher {
      */
     public static String resolveProfileDirectory(EdgeProfile profile, String userDataDir) {
         if (userDataDir != null && userDataDir.contains("Microsoft Edge Debug")) {
-            if ("Anushree".equalsIgnoreCase(profile.name())) {
-                File prof1 = new File(userDataDir, "Profile 1");
-                if (prof1.exists()) return "Profile 1";
-                File anushreeDir = new File(userDataDir, "Anushree");
-                if (anushreeDir.exists()) return "Anushree";
-            } else if ("Abhinav".equalsIgnoreCase(profile.name())) {
-                return "Default";
+            File localStateFile = new File(userDataDir, "Local State");
+            if (localStateFile.exists() && localStateFile.isFile()) {
+                try (FileReader reader = new FileReader(localStateFile)) {
+                    JsonObject root = JsonParser.parseReader(reader).getAsJsonObject();
+                    if (root.has("profile") && root.getAsJsonObject("profile").has("info_cache")) {
+                        JsonObject infoCache = root.getAsJsonObject("profile").getAsJsonObject("info_cache");
+                        for (Map.Entry<String, JsonElement> entry : infoCache.entrySet()) {
+                            String dirKey = entry.getKey();
+                            if (!entry.getValue().isJsonObject()) continue;
+                            JsonObject pObj = entry.getValue().getAsJsonObject();
+                            String name = pObj.has("name") ? pObj.get("name").getAsString() : "";
+                            String firstName = pObj.has("edge_account_first_name") ? pObj.get("edge_account_first_name").getAsString() : "";
+                            String gaiaName = pObj.has("gaia_name") ? pObj.get("gaia_name").getAsString() : "";
+
+                            if (dirKey.equalsIgnoreCase(profile.directory()) ||
+                                dirKey.equalsIgnoreCase(profile.name()) ||
+                                name.equalsIgnoreCase(profile.name()) ||
+                                firstName.equalsIgnoreCase(profile.name()) ||
+                                gaiaName.equalsIgnoreCase(profile.name())) {
+                                return dirKey;
+                            }
+                        }
+                    }
+                } catch (Exception ignored) {}
+            }
+            if (new File(userDataDir, profile.directory()).exists()) {
+                return profile.directory();
+            }
+            if (new File(userDataDir, profile.name()).exists()) {
+                return profile.name();
             }
         }
         return profile.directory();

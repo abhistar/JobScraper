@@ -17,8 +17,6 @@ import java.util.*;
  */
 public class EdgeProfileManager {
 
-    public static final Set<String> ALLOWED_PROFILE_NAMES = Set.of("abhinav", "anushree");
-
     /**
      * Returns candidate user data directories based on the operating system.
      */
@@ -100,50 +98,70 @@ public class EdgeProfileManager {
     }
 
     /**
-     * Validates that the requested target profile name is only among "Abhinav" or "Anushree".
+     * Validates that the requested target profile name matches an available profile.
      * Throws IllegalArgumentException if invalid.
      */
     public static void validateProfileName(String targetName) {
-        if (targetName == null || targetName.isBlank() ||
-                !ALLOWED_PROFILE_NAMES.contains(targetName.trim().toLowerCase())) {
+        if (targetName == null || targetName.isBlank()) {
+            throw new IllegalArgumentException("Browser profile name cannot be null or empty.");
+        }
+        List<EdgeProfile> profiles = getAvailableProfiles();
+        boolean matched = profiles.stream().anyMatch(p ->
+                p.name().equalsIgnoreCase(targetName.trim()) ||
+                p.directory().equalsIgnoreCase(targetName.trim()));
+        if (!matched) {
+            List<String> names = profiles.stream().map(EdgeProfile::name).toList();
             throw new IllegalArgumentException(
                     "Invalid browser profile: '" + targetName + "'. " +
-                    "Access restricted: The browser profile must only be one of: [\"Abhinav\", \"Anushree\"]."
+                    "Available profiles: " + names
             );
         }
     }
 
     /**
-     * Normalizes the target profile name to canonical title case ("Abhinav" or "Anushree").
+     * Normalizes the target profile name to canonical profile name from available profiles.
      */
     public static String normalizeProfileName(String targetName) {
-        validateProfileName(targetName);
-        String trimmed = targetName.trim().toLowerCase();
-        if ("abhinav".equals(trimmed)) {
-            return "Abhinav";
-        } else if ("anushree".equals(trimmed)) {
-            return "Anushree";
+        if (targetName == null || targetName.isBlank()) {
+            throw new IllegalArgumentException("Browser profile name cannot be null or empty.");
         }
-        return targetName.trim();
+        List<EdgeProfile> profiles = getAvailableProfiles();
+        for (EdgeProfile p : profiles) {
+            if (p.name().equalsIgnoreCase(targetName.trim()) ||
+                p.directory().equalsIgnoreCase(targetName.trim())) {
+                return p.name();
+            }
+        }
+        throw new IllegalArgumentException(
+                "Invalid browser profile: '" + targetName + "'. " +
+                "Available profiles: " + profiles.stream().map(EdgeProfile::name).toList()
+        );
     }
 
     /**
-     * Finds the EdgeProfile matching the target profile name.
+     * Finds the EdgeProfile matching the target profile name or directory.
      */
     public static EdgeProfile getProfileForName(String targetName) {
-        String canonical = normalizeProfileName(targetName);
+        if (targetName == null || targetName.isBlank()) {
+            throw new IllegalArgumentException("Browser profile name cannot be null or empty.");
+        }
         List<EdgeProfile> profiles = getAvailableProfiles();
 
         for (EdgeProfile p : profiles) {
-            if (p.name().equalsIgnoreCase(canonical) || p.directory().equalsIgnoreCase(canonical)) {
+            if (p.name().equalsIgnoreCase(targetName.trim()) || p.directory().equalsIgnoreCase(targetName.trim())) {
                 return p;
             }
         }
 
-        // Fallback default directory mappings if Local State didn't have full match
-        String defaultDir = "Abhinav".equalsIgnoreCase(canonical) ? "Default" : "Anushree";
-        List<Path> dirs = getCandidateUserDataDirs();
-        String uDir = dirs.isEmpty() ? "" : dirs.get(0).toString();
-        return new EdgeProfile(canonical, defaultDir, "", uDir);
+        if (profiles.isEmpty()) {
+            List<Path> dirs = getCandidateUserDataDirs();
+            String uDir = dirs.isEmpty() ? "" : dirs.get(0).toString();
+            return new EdgeProfile(targetName.trim(), "Default", "", uDir);
+        }
+
+        throw new IllegalArgumentException(
+                "Invalid browser profile: '" + targetName + "'. " +
+                "Available profiles: " + profiles.stream().map(EdgeProfile::name).toList()
+        );
     }
 }

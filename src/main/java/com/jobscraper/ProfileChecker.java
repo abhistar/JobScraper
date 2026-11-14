@@ -18,6 +18,29 @@ import java.util.Optional;
  */
 public class ProfileChecker {
 
+    /**
+     * Retrieves all available Edge profiles on the system.
+     */
+    public static List<EdgeProfile> getAvailableProfiles() {
+        return EdgeProfileManager.getAvailableProfiles();
+    }
+
+    /**
+     * Finds the profile matching the given profile name or directory (case-insensitive).
+     */
+    public static Optional<EdgeProfile> findProfile(String targetProfile) {
+        if (targetProfile == null || targetProfile.isBlank()) {
+            return Optional.empty();
+        }
+        String query = targetProfile.trim();
+        for (EdgeProfile p : getAvailableProfiles()) {
+            if (p.name().equalsIgnoreCase(query) || p.directory().equalsIgnoreCase(query)) {
+                return Optional.of(p);
+            }
+        }
+        return Optional.empty();
+    }
+
     public static void main(String[] args) {
         String targetProfile = null;
         boolean openBrowser = false;
@@ -37,29 +60,32 @@ public class ProfileChecker {
             }
         }
 
-        // If target profile is provided, perform strict validation
+        // If target profile is provided, check against available profiles grabbed from ProfileChecker
         if (targetProfile != null && !targetProfile.isBlank()) {
-            try {
-                EdgeProfileManager.validateProfileName(targetProfile);
-                EdgeProfile profile = EdgeProfileManager.getProfileForName(targetProfile);
-                boolean isRunning = isProfileRunning(profile);
-
-                System.out.println("Profile Name: " + profile.name() +
-                                   ", Directory: " + profile.directory() +
-                                   ", Email: " + (profile.email().isBlank() ? "N/A" : profile.email()) +
-                                   ", Running: " + (isRunning ? "Yes" : "No"));
-
-                if (openBrowser) {
-                    if (isRunning) {
-                        System.out.println("[*] Microsoft Edge is already running with profile: " + profile.name() + " (" + profile.directory() + ")");
-                    } else {
-                        System.out.println("[*] Launching Microsoft Edge for profile: " + profile.name() + " (" + profile.directory() + ")...");
-                        launchBrowserProfile(profile);
-                    }
-                }
-            } catch (IllegalArgumentException e) {
-                System.err.println("[!] ERROR: " + e.getMessage());
+            final String requested = targetProfile;
+            Optional<EdgeProfile> matchedProfile = findProfile(requested);
+            if (matchedProfile.isEmpty()) {
+                List<String> names = getAvailableProfiles().stream().map(EdgeProfile::name).toList();
+                System.err.println("[!] ERROR: Invalid browser profile: '" + requested + "'. Available profiles: " + names);
                 System.exit(1);
+                return;
+            }
+
+            EdgeProfile profile = matchedProfile.get();
+            boolean isRunning = isProfileRunning(profile);
+
+            System.out.println("Profile Name: " + profile.name() +
+                               ", Directory: " + profile.directory() +
+                               ", Email: " + (profile.email().isBlank() ? "N/A" : profile.email()) +
+                               ", Running: " + (isRunning ? "Yes" : "No"));
+
+            if (openBrowser) {
+                if (isRunning) {
+                    System.out.println("[*] Microsoft Edge is already running with profile: " + profile.name() + " (" + profile.directory() + ")");
+                } else {
+                    System.out.println("[*] Launching Microsoft Edge for profile: " + profile.name() + " (" + profile.directory() + ")...");
+                    launchBrowserProfile(profile);
+                }
             }
             return;
         }

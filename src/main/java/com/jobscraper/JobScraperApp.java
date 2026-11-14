@@ -29,12 +29,12 @@ import java.util.Set;
 public class JobScraperApp {
 
     public static void main(String[] args) {
-        String targetProfileName = "Abhinav"; // default profile
+        String targetProfileName = null;
         boolean scrapePreferences = true;
         boolean scrapeProfileMatch = true;
         boolean scrapeInstahyre = true;
 
-        // Parse CLI arguments: e.g. --profile=Abhinav or --profile=Anushree
+        // Parse CLI arguments: e.g. --profile=<profile_name>
         for (int i = 0; i < args.length; i++) {
             String arg = args[i];
             if (arg.startsWith("--profile=")) {
@@ -66,16 +66,27 @@ public class JobScraperApp {
         System.out.println("       EDGE BROWSER JOB SCRAPING AUTOMATION");
         System.out.println("=".repeat(65));
 
-        // Step 2: Validate profile choice strictly ("Abhinav" or "Anushree")
-        try {
-            EdgeProfileManager.validateProfileName(targetProfileName);
-        } catch (IllegalArgumentException e) {
-            System.err.println("\n[!] FATAL ERROR: " + e.getMessage() + "\n");
-            System.exit(1);
+        // Step 2: Validate profile choice against available profiles grabbed from ProfileChecker
+        List<EdgeProfile> availableProfiles = ProfileChecker.getAvailableProfiles();
+        if (targetProfileName == null || targetProfileName.isBlank()) {
+            targetProfileName = availableProfiles.stream()
+                    .filter(ProfileChecker::isProfileRunning)
+                    .map(EdgeProfile::name)
+                    .findFirst()
+                    .or(() -> availableProfiles.stream().map(EdgeProfile::name).findFirst())
+                    .orElse("Default");
         }
 
-        String normalizedProfile = EdgeProfileManager.normalizeProfileName(targetProfileName);
-        EdgeProfile profile = EdgeProfileManager.getProfileForName(normalizedProfile);
+        final String requestedProfile = targetProfileName;
+        EdgeProfile profile = ProfileChecker.findProfile(requestedProfile).orElse(null);
+        if (profile == null) {
+            List<String> validNames = availableProfiles.stream().map(EdgeProfile::name).toList();
+            System.err.println("\n[!] FATAL ERROR: Invalid browser profile: '" + requestedProfile + "'. Available profiles: " + validNames + "\n");
+            System.exit(1);
+            return;
+        }
+
+        String normalizedProfile = profile.name();
         System.out.println("[✓] Active Profile Selected: " + profile.name() + " (Directory: " + profile.directory() + ")");
 
         EdgeBrowserLauncher launcher = new EdgeBrowserLauncher();

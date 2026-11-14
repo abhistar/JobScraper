@@ -5,7 +5,7 @@ Java Playwright job scraping automation for Microsoft Edge browser.
 ## Features
 
 - **Profile Checker Script**: Detects and inspects Microsoft Edge browser profiles (`Local State`), outputting profile Name, directory, and email.
-- **Profile Validation**: Restricts browser profile selection strictly to `"Abhinav"` or `"Anushree"`.
+- **Profile Validation**: Accepts any profile argument and validates it dynamically against available browser profiles detected by ProfileChecker.
 - **LinkedIn Scraping**:
   - Navigates to `https://www.linkedin.com/jobs/`
   - Clicks `Show all ->` under the `Jobs based on your preferences` section
@@ -37,33 +37,27 @@ Inspect all available Edge profiles:
 mvn exec:java -Dexec.mainClass="com.jobscraper.ProfileChecker"
 ```
 
-Verify / check a specific profile (checks that profile is only among "Abhinav" or "Anushree"):
+Verify / check a specific profile (validates against available Edge profiles):
 ```bash
-# Allowed profiles:
-mvn exec:java -Dexec.mainClass="com.jobscraper.ProfileChecker" -Dexec.args="--profile=Abhinav"
-mvn exec:java -Dexec.mainClass="com.jobscraper.ProfileChecker" -Dexec.args="--profile=Anushree"
+# Check profile by name or directory:
+mvn exec:java -Dexec.mainClass="com.jobscraper.ProfileChecker" -Dexec.args="--profile=<profile_name>"
 
 # Check profile and launch Edge with that profile if not already open:
-mvn exec:java -Dexec.mainClass="com.jobscraper.ProfileChecker" -Dexec.args="--profile=Abhinav --open"
-mvn exec:java -Dexec.mainClass="com.jobscraper.ProfileChecker" -Dexec.args="--profile=Anushree --open"
+mvn exec:java -Dexec.mainClass="com.jobscraper.ProfileChecker" -Dexec.args="--profile=<profile_name> --open"
 
-# Disallowed profiles will be rejected:
+# Non-existent profiles will be rejected:
 mvn exec:java -Dexec.mainClass="com.jobscraper.ProfileChecker" -Dexec.args="--profile=Unknown"
 ```
 
 ### 3. Run Script 2: Main Job Scraper
-Run job scraper with default profile ("Abhinav"):
+Run job scraper with default profile (auto-detects running profile or first available profile):
 ```bash
 mvn exec:java -Dexec.mainClass="com.jobscraper.JobScraperApp"
 ```
 
 Run job scraper with a specific profile:
 ```bash
-# For Abhinav:
-mvn exec:java -Dexec.mainClass="com.jobscraper.JobScraperApp" -Dexec.args="--profile=Abhinav"
-
-# For Anushree:
-mvn exec:java -Dexec.mainClass="com.jobscraper.JobScraperApp" -Dexec.args="--profile=Anushree"
+mvn exec:java -Dexec.mainClass="com.jobscraper.JobScraperApp" -Dexec.args="--profile=<profile_name>"
 ```
 
 ### 4. Run Unit Tests
