@@ -16,6 +16,11 @@ Java Playwright job scraping automation for Microsoft Edge browser.
   - Navigates to `https://www.instahyre.com/candidate/opportunities/`
   - Collects all opportunity jobs on the page via Angular model and DOM inspection.
   - Filters out small companies.
+- **Company Whitelist**:
+  - Automatically records rejected companies (< 500 employees) into `<targetProfileName>_company_whitelist.csv` with columns: `company name`, `company link on linkedin`, `isWhitelisted`.
+  - Rejections are collected in memory during scraping and written to CSV in a single batch operation at the end.
+  - Cleans company URLs by removing `/home`, `/life`, `/about`, `/jobs`, `/people` and trailing queries.
+  - When `isWhitelisted` is set to `true`, the scraper bypasses the employee size filter on subsequent runs.
 - **CSV Export**:
   - Saves all collected jobs into `<target_profile_name>_job_lookup_<ddmmyyyy>.csv`
 - **Session Management**:

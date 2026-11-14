@@ -6,6 +6,7 @@ import com.jobscraper.scraper.InstahyreScraper;
 import com.jobscraper.scraper.LinkedInProfileMatchScraper;
 import com.jobscraper.scraper.LinkedInScraper;
 import com.jobscraper.util.CompanySizeFilter;
+import com.jobscraper.util.CompanyWhitelistManager;
 import com.jobscraper.util.CsvWriter;
 import com.jobscraper.util.EdgeBrowserLauncher;
 import com.jobscraper.util.EdgeProfileManager;
@@ -89,6 +90,9 @@ public class JobScraperApp {
         String normalizedProfile = profile.name();
         System.out.println("[✓] Active Profile Selected: " + profile.name() + " (Directory: " + profile.directory() + ")");
 
+        File repoDir = new File(System.getProperty("user.dir"));
+        CompanyWhitelistManager whitelistManager = CompanyWhitelistManager.getInstance(normalizedProfile, repoDir);
+
         EdgeBrowserLauncher launcher = new EdgeBrowserLauncher();
         List<JobPost> allJobs = new ArrayList<>();
         List<JobPost> linkedInJobs = new ArrayList<>();
@@ -149,7 +153,7 @@ public class JobScraperApp {
                 }
             }
 
-            // Step 5: Save all collected jobs to CSV (guaranteeing >= 500 employees and deduplicating by URL)
+            // Step 5: Save all collected jobs to CSV (guaranteeing >= 500 employees or whitelisted, and deduplicating by URL)
             Set<String> seenJobUrls = new HashSet<>();
             List<JobPost> verifiedJobs = new ArrayList<>();
             for (JobPost job : allJobs) {
@@ -157,15 +161,22 @@ public class JobScraperApp {
                 if (!u.isBlank() && !seenJobUrls.add(u)) {
                     continue;
                 }
-                if (CompanySizeFilter.meetsMinimumCompanySize(job.companySize())) {
+                if (CompanySizeFilter.meetsMinimumCompanySize(job.companySize()) ||
+                    whitelistManager.isWhitelisted(job.company(), "")) {
                     verifiedJobs.add(job);
                 } else {
                     System.out.println("[!] Dropping job failing >= 500 company size requirement: " + job.company() + " (" + job.companySize() + ")");
                 }
             }
 
-            File repoDir = new File(System.getProperty("user.dir"));
             File csvFile = CsvWriter.writeJobsToCsv(verifiedJobs, normalizedProfile, repoDir);
+
+            // Write all collected rejections to <targetProfileName>_company_whitelist.csv at the end in a single write operation
+            whitelistManager.save();
+            File wlFile = whitelistManager.getWhitelistFile();
+            long wlCount = whitelistManager.getEntries().stream()
+                    .filter(CompanyWhitelistManager.WhitelistEntry::isWhitelisted).count();
+            long totalWl = whitelistManager.getEntries().size();
 
             System.out.println("\n" + "=".repeat(65));
             System.out.println("[✓] SCRAPING SUMMARY");
@@ -176,6 +187,7 @@ public class JobScraperApp {
             System.out.println("  - LinkedIn (Profile Match):    " + linkedInProfileMatchJobs.size());
             System.out.println("  - Instahyre:                   " + instahyreJobs.size());
             System.out.println("Output File:                     " + csvFile.getAbsolutePath());
+            System.out.println("Whitelist File:                  " + wlFile.getAbsolutePath() + " (Total: " + totalWl + ", Whitelisted: " + wlCount + ")");
             System.out.println("=".repeat(65) + "\n");
 
         } catch (Exception e) {

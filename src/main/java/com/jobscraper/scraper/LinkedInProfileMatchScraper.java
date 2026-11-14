@@ -6,6 +6,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.jobscraper.model.JobPost;
 import com.jobscraper.util.CompanySizeFilter;
+import com.jobscraper.util.CompanyWhitelistManager;
 import com.microsoft.playwright.Locator;
 import com.microsoft.playwright.Page;
 import com.microsoft.playwright.options.WaitForSelectorState;
@@ -29,6 +30,7 @@ public class LinkedInProfileMatchScraper {
     public static List<JobPost> scrape(Page page, String targetProfileName) {
         List<JobPost> jobs = new ArrayList<>();
         Set<String> seenUrls = new HashSet<>();
+        CompanyWhitelistManager whitelistManager = CompanyWhitelistManager.getInstance(targetProfileName);
 
         System.out.println("\n" + "=".repeat(60));
         System.out.println("  LINKEDIN JOBS - MATCH YOUR PROFILE (Profile: " + targetProfileName + ")");
@@ -399,10 +401,41 @@ public class LinkedInProfileMatchScraper {
                                 "    if (m) companySize = m[1].trim();" +
                                 "  }" +
                                 "  " +
+                                "  // Extract Company URL from top of job details\n" +
+                                "  let companyUrl = '';" +
+                                "  const topCardSelectors = [" +
+                                "    '.job-details-jobs-unified-top-card__company-name a', " +
+                                "    '.jobs-unified-top-card__company-name a', " +
+                                "    '.job-details-jobs-unified-top-card__primary-description-container a[href*=\"/company/\"], ' + " +
+                                "    '.job-details-jobs-unified-top-card__primary-description-container a', " +
+                                "    '.jobs-unified-top-card__primary-description a[href*=\"/company/\"], ' + " +
+                                "    'a.topcard__org-name-link', " +
+                                "    'a[href*=\"/company/\"]'" +
+                                "  ];" +
+                                "  if (detailContainer) {" +
+                                "    for (const sel of topCardSelectors) {" +
+                                "      const el = detailContainer.querySelector(sel);" +
+                                "      if (el && el.getAttribute('href')) {" +
+                                "        const h = el.getAttribute('href');" +
+                                "        if (h.includes('/company/')) {" +
+                                "          companyUrl = h;" +
+                                "          break;" +
+                                "        }" +
+                                "      }" +
+                                "    }" +
+                                "  }" +
+                                "  if (!companyUrl) {" +
+                                "    const anyLink = document.querySelector('.job-details-jobs-unified-top-card__company-name a, .jobs-unified-top-card__company-name a, a[href*=\"linkedin.com/company/\"]');" +
+                                "    if (anyLink && anyLink.getAttribute('href')) {" +
+                                "      companyUrl = anyLink.getAttribute('href');" +
+                                "    }" +
+                                "  }" +
+                                "  " +
                                 "  const fullDetailText = detailContainer ? detailContainer.innerText : '';" +
                                 "  return JSON.stringify({" +
                                 "    applyUrl: applyUrl," +
                                 "    companySize: companySize," +
+                                "    companyUrl: companyUrl," +
                                 "    detailText: fullDetailText.substring(0, 10000)" +
                                 "  });" +
                                 "}");
@@ -410,12 +443,16 @@ public class LinkedInProfileMatchScraper {
                         String detailText = "";
                         String applyUrl = "";
                         String companySize = "";
+                        String rawCompanyUrl = "";
                         if (paneInfoJson != null) {
                             JsonObject paneObj = JsonParser.parseString(paneInfoJson).getAsJsonObject();
                             applyUrl = paneObj.has("applyUrl") ? paneObj.get("applyUrl").getAsString() : "";
                             companySize = paneObj.has("companySize") ? paneObj.get("companySize").getAsString() : "";
+                            rawCompanyUrl = paneObj.has("companyUrl") ? paneObj.get("companyUrl").getAsString() : "";
                             detailText = paneObj.has("detailText") ? paneObj.get("detailText").getAsString() : "";
                         }
+
+                        String cleanCompanyUrl = CompanyWhitelistManager.cleanCompanyUrl(rawCompanyUrl);
 
                         if (companySize.isBlank()) {
                             Matcher csMatcher = COMPANY_SIZE_PATTERN.matcher(detailText);
@@ -450,9 +487,13 @@ public class LinkedInProfileMatchScraper {
                         Matcher dateMatcher = DATE_POSTED_PATTERN.matcher(fullText);
                         String datePosted = dateMatcher.find() ? dateMatcher.group(0) : "Past week";
 
-                        // Company size filter (minimum 500 employees)
-                        if (!CompanySizeFilter.meetsMinimumCompanySize(companySize)) {
+                        // Company size filter (minimum 500 employees, unless whitelisted)
+                        boolean whitelisted = whitelistManager.isWhitelisted(company, cleanCompanyUrl);
+                        if (whitelisted) {
+                            System.out.println("    [★] Whitelisted company - bypassing employee size filter: " + company + " (" + (companySize.isBlank() ? "unknown size" : companySize) + ")");
+                        } else if (!CompanySizeFilter.meetsMinimumCompanySize(companySize)) {
                             System.out.println("    [-] Skipping company with < 500 employees: " + company + " (" + (companySize.isBlank() ? "unknown size" : companySize) + ")");
+                            whitelistManager.recordRejectedCompany(company, cleanCompanyUrl);
                             continue;
                         }
 

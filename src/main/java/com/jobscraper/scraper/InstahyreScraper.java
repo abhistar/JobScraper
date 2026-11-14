@@ -6,6 +6,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.jobscraper.model.JobPost;
 import com.jobscraper.util.CompanySizeFilter;
+import com.jobscraper.util.CompanyWhitelistManager;
 import com.microsoft.playwright.Page;
 import com.microsoft.playwright.options.WaitUntilState;
 
@@ -19,6 +20,7 @@ public class InstahyreScraper {
     public static List<JobPost> scrape(Page page, String targetProfileName) {
         List<JobPost> jobs = new ArrayList<>();
         Set<String> seenKeys = new HashSet<>();
+        CompanyWhitelistManager whitelistManager = CompanyWhitelistManager.getInstance(targetProfileName);
 
         System.out.println("\n" + "=".repeat(60));
         System.out.println("  INSTAHYRE JOBS (Profile: " + targetProfileName + ")");
@@ -143,8 +145,11 @@ public class InstahyreScraper {
                         continue;
                     }
 
-                    // Company size filter (minimum 500 employees)
-                    if (!CompanySizeFilter.meetsMinimumCompanySize(companySize)) {
+                    // Company size filter (minimum 500 employees, unless whitelisted)
+                    boolean whitelisted = whitelistManager.isWhitelisted(company, "");
+                    if (whitelisted) {
+                        System.out.println("    [★] Whitelisted company - bypassing employee size filter: " + company + " (" + (companySize.isBlank() ? "unknown size" : companySize) + ")");
+                    } else if (!CompanySizeFilter.meetsMinimumCompanySize(companySize)) {
                         System.out.println("    [-] Skipping company with < 500 employees: " + company + " (" + (companySize.isBlank() ? "unknown size" : companySize) + ")");
                         continue;
                     }
