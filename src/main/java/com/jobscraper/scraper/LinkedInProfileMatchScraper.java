@@ -6,7 +6,9 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.jobscraper.model.JobPost;
 import com.jobscraper.util.CompanySizeFilter;
+import com.microsoft.playwright.Locator;
 import com.microsoft.playwright.Page;
+import com.microsoft.playwright.options.WaitForSelectorState;
 import com.microsoft.playwright.options.WaitUntilState;
 
 import java.net.URLDecoder;
@@ -36,7 +38,10 @@ public class LinkedInProfileMatchScraper {
             System.out.println("[*] Navigating to https://www.linkedin.com/jobs/ ...");
             page.navigate("https://www.linkedin.com/jobs/",
                     new Page.NavigateOptions().setWaitUntil(WaitUntilState.DOMCONTENTLOADED).setTimeout(30000));
-            page.waitForTimeout(4000);
+            try {
+                page.waitForSelector("main, div[data-testid='lazy-column'], a[href*='LANDING'], input[name='session_key'], #username",
+                        new Page.WaitForSelectorOptions().setState(WaitForSelectorState.ATTACHED).setTimeout(15000));
+            } catch (Exception ignored) {}
 
             // Check if redirected to login/authwall
             String currentUrl = page.url().toLowerCase();
@@ -80,7 +85,11 @@ public class LinkedInProfileMatchScraper {
                 }
             }
 
-            page.waitForTimeout(4000);
+            try {
+                page.waitForSelector("div[data-testid='lazy-column'], div[role='button'][componentkey^='job-card-component-ref-'], .jobs-search-results__list-item",
+                        new Page.WaitForSelectorOptions().setState(WaitForSelectorState.ATTACHED).setTimeout(15000));
+            } catch (Exception ignored) {}
+
             System.out.println("[*] Profile match search results loaded: " + page.url());
 
             // Apply 'Past week' filter if not present
@@ -93,27 +102,41 @@ public class LinkedInProfileMatchScraper {
                         "              Array.from(document.querySelectorAll(\"div[role='button'], button, label\")).find(el => el.innerText && el.innerText.trim() === 'Date posted');" +
                         "  if (btn) btn.click();" +
                         "}");
-                page.waitForTimeout(1200);
+                try {
+                    page.waitForSelector("input[aria-label='Past week'], label:has-text('Past week'), [aria-label*='Date posted']",
+                            new Page.WaitForSelectorOptions().setState(WaitForSelectorState.ATTACHED).setTimeout(4000));
+                } catch (Exception ignored) {}
+
                 // Select Past week radio
                 page.evaluate("() => {" +
                         "  const radio = document.querySelector(\"input[aria-label='Past week']\") ||" +
                         "                Array.from(document.querySelectorAll(\"label, span, p\")).find(el => el.innerText && el.innerText.trim() === 'Past week');" +
                         "  if (radio) radio.click();" +
                         "}");
-                page.waitForTimeout(800);
+                try {
+                    page.waitForSelector("button:has-text('Show results'), a:has-text('Show results')",
+                            new Page.WaitForSelectorOptions().setState(WaitForSelectorState.ATTACHED).setTimeout(3000));
+                } catch (Exception ignored) {}
+
                 // Click Show results button
                 page.evaluate("() => {" +
                         "  const showBtn = Array.from(document.querySelectorAll(\"a, button\")).find(el => el.innerText && el.innerText.includes('Show results'));" +
                         "  if (showBtn) showBtn.click();" +
                         "}");
-                page.waitForTimeout(3000);
+                try {
+                    page.waitForURL(url -> url.contains("f_TPR=r604800"),
+                            new Page.WaitForURLOptions().setTimeout(5000));
+                } catch (Exception ignored) {}
 
                 // Fallback to query parameter navigation if not yet applied
                 if (!page.url().contains("f_TPR=r604800")) {
                     String sep = page.url().contains("?") ? "&" : "?";
                     page.navigate(page.url() + sep + "f_TPR=r604800",
                             new Page.NavigateOptions().setWaitUntil(WaitUntilState.DOMCONTENTLOADED).setTimeout(20000));
-                    page.waitForTimeout(2500);
+                    try {
+                        page.waitForSelector("div[data-testid='lazy-column']",
+                                new Page.WaitForSelectorOptions().setState(WaitForSelectorState.ATTACHED).setTimeout(10000));
+                    } catch (Exception ignored) {}
                 }
             }
 
@@ -125,7 +148,10 @@ public class LinkedInProfileMatchScraper {
                         "  if (col) col.scrollBy(0, 1000);" +
                         "  else window.scrollBy(0, 800);" +
                         "}");
-                page.waitForTimeout(1000);
+                try {
+                    page.locator("div[data-testid='lazy-column'] div[role='button'][componentkey^='job-card-component-ref-']")
+                            .last().waitFor(new Locator.WaitForOptions().setState(WaitForSelectorState.ATTACHED).setTimeout(1500));
+                } catch (Exception ignored) {}
             }
 
             // Step 4: Extract all job cards and their data
@@ -262,7 +288,29 @@ public class LinkedInProfileMatchScraper {
                             "  return JSON.stringify({ clicked: false });" +
                             "}", List.of(jobId, index));
 
-                    page.waitForTimeout(1200);
+                    // Wait for the detail pane to update for this job
+                    if (!jobId.isBlank()) {
+                        try {
+                            page.waitForSelector("#JobDetails_AboutTheJob_" + jobId + ", [id*='" + jobId + "']",
+                                    new Page.WaitForSelectorOptions().setState(WaitForSelectorState.ATTACHED).setTimeout(3000));
+                        } catch (Exception ignored) {}
+                    }
+
+                    // Wait for company size/insight element to attach in the right detail pane
+                    try {
+                        Locator rightPane = page.locator("div[data-testid='lazy-column']").nth(1);
+                        if (rightPane.count() == 0) {
+                            rightPane = page.locator(".jobs-search__job-details, .scaffold-layout__detail, main .jobs-details");
+                        }
+                        Locator empLocator = rightPane.locator("text=/([\\d,]+(?:\\s*-\\s*[\\d,]+|\\+)?\\s+employees?)/i").first();
+                        empLocator.waitFor(new Locator.WaitForOptions().setState(WaitForSelectorState.ATTACHED).setTimeout(3500));
+                    } catch (Exception ignored) {}
+
+                    // Wait for apply button to be attached
+                    try {
+                        page.waitForSelector(".jobs-apply-button, button[aria-label*='Apply'], a[aria-label*='Apply'], .jobs-s-apply button",
+                                new Page.WaitForSelectorOptions().setState(WaitForSelectorState.ATTACHED).setTimeout(1500));
+                    } catch (Exception ignored) {}
 
                     // Inspect details pane for apply URL, company size, experience, and full text
                     String paneInfoJson = (String) page.evaluate("() => {" +
@@ -284,7 +332,8 @@ public class LinkedInProfileMatchScraper {
                             "    }" +
                             "  }" +
                             "  " +
-                            "  let detailContainer = document.querySelector(" +
+                            "  const cols = document.querySelectorAll(\"div[data-testid='lazy-column']\");" +
+                            "  let detailContainer = cols.length > 1 ? cols[1] : document.querySelector(" +
                             "    '.jobs-search__job-details, ' +" +
                             "    '.jobs-search__job-details--container, ' +" +
                             "    '.scaffold-layout__detail, ' +" +
@@ -329,6 +378,10 @@ public class LinkedInProfileMatchScraper {
                             "      if (m) companySize = m[1].trim();" +
                             "    }" +
                             "  }" +
+                            "  if (!companySize) {" +
+                            "    const m = document.body.innerText.match(sizePattern);" +
+                            "    if (m) companySize = m[1].trim();" +
+                            "  }" +
                             "  " +
                             "  const fullDetailText = detailContainer ? detailContainer.innerText : '';" +
                             "  return JSON.stringify({" +
@@ -356,16 +409,15 @@ public class LinkedInProfileMatchScraper {
                     }
 
                     if (companySize.isBlank()) {
-                        page.waitForTimeout(600);
-                        String retrySize = (String) page.evaluate("() => {" +
-                                "  const dc = document.querySelector('.jobs-search__job-details, .scaffold-layout__detail, .job-view-layout, main .jobs-details');" +
-                                "  const txt = dc ? dc.innerText : '';" +
-                                "  const m = txt.match(/([\\d,]+(?:\\s*-\\s*[\\d,]+|\\+)?\\s+employees?)/i);" +
-                                "  return m ? m[1].trim() : '';" +
-                                "}");
-                        if (retrySize != null && !retrySize.isBlank()) {
-                            companySize = retrySize.trim();
-                        }
+                        try {
+                            Locator generalEmp = page.locator("text=/([\\d,]+(?:\\s*-\\s*[\\d,]+|\\+)?\\s+employees?)/i").first();
+                            generalEmp.waitFor(new Locator.WaitForOptions().setState(WaitForSelectorState.ATTACHED).setTimeout(2000));
+                            String txt = generalEmp.innerText();
+                            Matcher csMatcher = COMPANY_SIZE_PATTERN.matcher(txt);
+                            if (csMatcher.find()) {
+                                companySize = csMatcher.group(0).trim();
+                            }
+                        } catch (Exception ignored) {}
                     }
 
                     // Decode safety redirect apply URL if present

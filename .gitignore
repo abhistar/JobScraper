@@ -42,3 +42,6 @@ resume/*.txt
 # Profile data
 profiles/*.md
 !profiles/template_profile.md
+
+# Evidence data
+evidence/*
