@@ -27,8 +27,8 @@ public class InstahyreScraper {
         System.out.println("=".repeat(60));
 
         try {
-            System.out.println("[*] Navigating to https://www.instahyre.com/candidate/opportunities/ ...");
-            page.navigate("https://www.instahyre.com/candidate/opportunities/",
+            System.out.println("[*] Navigating to https://www.instahyre.com/candidate/opportunities/ ... with filter for large companies");
+            page.navigate("https://www.instahyre.com/candidate/opportunities/?company_size=2",
                     new Page.NavigateOptions().setWaitUntil(WaitUntilState.DOMCONTENTLOADED).setTimeout(30000));
             page.waitForTimeout(4000);
 
